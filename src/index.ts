@@ -12,6 +12,9 @@ import { startUpdateCheck } from './update.js';
 import type { UpdateWorkArgs, AddTaskArgs } from './skills.js';
 
 const subcommand = process.argv[2];
+const subArgs = process.argv.slice(3);
+
+// ── Setup / maintenance subcommands ──────────────────────────────────────────
 
 if (subcommand === 'setup') {
   const { runSetup } = await import('./setup.js');
@@ -20,9 +23,7 @@ if (subcommand === 'setup') {
 }
 
 if (subcommand === 'configure') {
-  // Re-run only the Claude integration step (skip credential prompts)
   const { runConfigure } = await import('./setup.js');
-  const { loadConfig } = await import('./config.js');
   let prefix: string | undefined;
   try { prefix = loadConfig().installPrefix; } catch { /* ok */ }
   await runConfigure(prefix);
@@ -32,6 +33,44 @@ if (subcommand === 'configure') {
 if (subcommand === 'update') {
   const { runUpdate } = await import('./update.js');
   await runUpdate();
+  process.exit(0);
+}
+
+// ── Direct CLI commands ───────────────────────────────────────────────────────
+
+if (subcommand === 'dashboard' || subcommand === 'my-tasks') {
+  const { runDashboard } = await import('./cli.js');
+  await runDashboard();
+  process.exit(0);
+}
+
+if (subcommand === 'get-item') {
+  const { runGetItem } = await import('./cli.js');
+  await runGetItem(subArgs);
+  process.exit(0);
+}
+
+if (subcommand === 'add-task') {
+  const { runAddTask } = await import('./cli.js');
+  await runAddTask(subArgs);
+  process.exit(0);
+}
+
+if (subcommand === 'update-task') {
+  const { runUpdateTask } = await import('./cli.js');
+  await runUpdateTask(subArgs);
+  process.exit(0);
+}
+
+if (subcommand === 'update-item') {
+  const { runUpdateItem } = await import('./cli.js');
+  await runUpdateItem(subArgs);
+  process.exit(0);
+}
+
+if (subcommand === '--help' || subcommand === '-h' || subcommand === 'help') {
+  const { printHelp } = await import('./cli.js');
+  printHelp();
   process.exit(0);
 }
 

@@ -10,12 +10,58 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// src/config.ts
-var config_exports = {};
-__export(config_exports, {
-  CONFIG_PATH: () => CONFIG_PATH,
-  loadConfig: () => loadConfig
+// src/api.ts
+var api_exports = {};
+__export(api_exports, {
+  api: () => api,
+  getMe: () => getMe,
+  login: () => login
 });
+async function login(base, username, password) {
+  baseUrl = base.replace(/\/$/, "");
+  const res = await fetch(`${baseUrl}/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error ?? `Login failed: HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  token = data.token;
+  currentUser = data.user;
+  return data.user;
+}
+async function api(method, path, body) {
+  const res = await fetch(`${baseUrl}${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: body !== void 0 ? JSON.stringify(body) : void 0
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error ?? `HTTP ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+function getMe() {
+  return currentUser;
+}
+var token, currentUser, baseUrl;
+var init_api = __esm({
+  "src/api.ts"() {
+    "use strict";
+    token = null;
+    currentUser = null;
+    baseUrl = "";
+  }
+});
+
+// src/config.ts
 import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
@@ -146,6 +192,147 @@ var init_update = __esm({
     REPO = "github:Iot-Viet-Solution/viot-tasktisk";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     _updateAvailable = null;
+  }
+});
+
+// src/skills.ts
+function currentWeek() {
+  const d = /* @__PURE__ */ new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+  const yearStart = new Date(d.getFullYear(), 0, 1);
+  const weekNo = Math.ceil(((+d - +yearStart) / 864e5 + 1) / 7);
+  return `${d.getFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+}
+function todayStr() {
+  return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+}
+function weekEndStr() {
+  const d = /* @__PURE__ */ new Date();
+  const day = d.getDay() || 7;
+  d.setDate(d.getDate() + (7 - day));
+  return d.toISOString().slice(0, 10);
+}
+function fmtTask(t) {
+  const parts = [`[task:${t.id}] ${t.title}`, `(${t.status ?? "Todo"})`];
+  if (t.pname) parts.push(`\xB7 proj:${t.pname}`);
+  if (t.feature_name) parts.push(`> feat:${t.feature_name}`);
+  if (t.item_title) parts.push(`> item:${t.item_title}`);
+  if (t.due) parts.push(`due:${t.due}`);
+  if (t.priority === "Cao") parts.push("[HIGH]");
+  return parts.join(" ");
+}
+async function dashboard(apiFn, me) {
+  const [tasks, prio] = await Promise.all([
+    apiFn("GET", "/mytasks"),
+    apiFn("GET", `/priorities?week=${currentWeek()}`).catch(
+      () => ({ week: currentWeek(), items: [] })
+    )
+  ]);
+  const tod = todayStr();
+  const wend = weekEndStr();
+  const doneStatuses = /* @__PURE__ */ new Set(["Done", "Close", "Cancelled"]);
+  const active = tasks.filter((t) => !doneStatuses.has(t.status ?? ""));
+  const overdue = active.filter((t) => t.due && t.due < tod);
+  const dueToday = active.filter((t) => t.due === tod);
+  const dueWeek = active.filter((t) => t.due && t.due > tod && t.due <= wend);
+  const later = active.filter((t) => !t.due || t.due > wend);
+  const finished = tasks.filter((t) => doneStatuses.has(t.status ?? ""));
+  const newVersion = getUpdateAvailable();
+  const lines = [
+    `# Dashboard \u2014 ${me?.name ?? "Me"} \xB7 ${tod} (${prio.week})`,
+    ...newVersion ? [`
+> \u2B06\uFE0F  Update available: ${getLocalVersion()} \u2192 **${newVersion}** \u2014 run \`viot-tasktisk update\` then restart Claude Desktop.`] : [],
+    ""
+  ];
+  if (overdue.length) {
+    lines.push(`## \u{1F534} Overdue (${overdue.length})`);
+    overdue.forEach((t) => lines.push("- " + fmtTask(t)));
+    lines.push("");
+  }
+  if (dueToday.length) {
+    lines.push(`## \u{1F7E1} Due Today (${dueToday.length})`);
+    dueToday.forEach((t) => lines.push("- " + fmtTask(t)));
+    lines.push("");
+  }
+  if (dueWeek.length) {
+    lines.push(`## \u{1F7E2} This Week (${dueWeek.length})`);
+    dueWeek.forEach((t) => lines.push("- " + fmtTask(t)));
+    lines.push("");
+  }
+  if (later.length) {
+    lines.push(`## \u2B1C Later / No Due (${later.length})`);
+    later.forEach((t) => lines.push("- " + fmtTask(t)));
+    lines.push("");
+  }
+  if (finished.length) {
+    lines.push(`## \u2705 Done / Closed (${finished.length})`);
+    finished.forEach((t) => lines.push("- " + fmtTask(t)));
+    lines.push("");
+  }
+  if (!tasks.length) lines.push("_No tasks assigned to you._");
+  const prioItems = prio.items ?? [];
+  if (prioItems.length) {
+    lines.push(`## \u{1F4CC} Weekly Priorities (${prio.week})`);
+    [...prioItems].sort((a, b) => a.rank - b.rank).forEach((p) => {
+      const label = p.project_name ?? "\u2014";
+      const note = p.note ? ` \u2014 ${p.note}` : "";
+      lines.push(`${p.rank}. ${label}${note}`);
+    });
+  }
+  return lines.join("\n");
+}
+async function updateWork(apiFn, args) {
+  const { id, kind, status, due, priority } = args;
+  const path = kind === "task" ? `/tasks/${id}` : `/items/${id}`;
+  const patch = { status };
+  if (due !== void 0) patch.due = due;
+  if (priority !== void 0) patch.priority = priority;
+  const result = await apiFn("PATCH", path, patch);
+  const parts = [`Updated ${kind} #${id} \u2192 ${result.status ?? status}`];
+  if (result.due) parts.push(`due:${result.due}`);
+  if (result.priority) parts.push(`priority:${result.priority}`);
+  if (result.done_at) parts.push(`done_at:${result.done_at}`);
+  return parts.join(" \xB7 ");
+}
+async function addTask(apiFn, args) {
+  const { item_id, title, descr, due, priority, assignee } = args;
+  const payload = { title };
+  if (descr) payload.descr = descr;
+  if (due) payload.due = due;
+  if (priority) payload.priority = priority;
+  if (assignee != null) payload.assignee = assignee;
+  const task = await apiFn("POST", `/items/${item_id}/tasks`, payload);
+  return `Created task #${task.id}: "${task.title}" under item #${item_id}` + (task.due ? ` \xB7 due:${task.due}` : "");
+}
+async function getItem(apiFn, { id }) {
+  const item = await apiFn("GET", `/items/${id}`);
+  const lines = [
+    `# Item #${item.id}: ${item.title}`,
+    `Type: ${item.type} | Status: ${item.status} | Priority: ${item.priority}`,
+    `Feature: ${item.feature_name ?? "\u2014"} | Sprint: ${item.sprint_name ?? "none"}`,
+    `Assignee: ${item.assignee_name ?? "unassigned"}`,
+    `Progress: ${item.task_done}/${item.task_total} tasks (${item.task_pct}%)`
+  ];
+  if (item.description) lines.push("", `Description: ${item.description}`);
+  if (item.acceptance_criteria) lines.push("", `Acceptance criteria: ${item.acceptance_criteria}`);
+  const tasks = item.tasks ?? [];
+  if (tasks.length) {
+    lines.push("", `## Tasks (${tasks.length})`);
+    tasks.forEach((t) => {
+      const due = t.due ? ` due:${t.due}` : "";
+      const hi = t.priority === "Cao" ? " [HIGH]" : "";
+      lines.push(`- [task:${t.id}] [${t.status ?? "Todo"}] ${t.title}${due}${hi}`);
+    });
+  } else {
+    lines.push("", "_No tasks yet._");
+  }
+  return lines.join("\n");
+}
+var init_skills = __esm({
+  "src/skills.ts"() {
+    "use strict";
+    init_update();
   }
 });
 
@@ -401,193 +588,154 @@ var init_setup = __esm({
   }
 });
 
+// src/cli.ts
+var cli_exports = {};
+__export(cli_exports, {
+  printHelp: () => printHelp,
+  runAddTask: () => runAddTask,
+  runDashboard: () => runDashboard,
+  runGetItem: () => runGetItem,
+  runUpdateItem: () => runUpdateItem,
+  runUpdateTask: () => runUpdateTask
+});
+function die(msg, code = 1) {
+  process.stderr.write(msg + "\n");
+  process.exit(code);
+}
+function parseFlags(argv) {
+  const positional = [];
+  const flags = {};
+  let i = 0;
+  while (i < argv.length) {
+    const arg = argv[i];
+    if (arg.startsWith("--")) {
+      const eqIdx = arg.indexOf("=");
+      if (eqIdx !== -1) {
+        flags[arg.slice(2, eqIdx)] = arg.slice(eqIdx + 1);
+      } else if (i + 1 < argv.length && !argv[i + 1].startsWith("--")) {
+        flags[arg.slice(2)] = argv[++i];
+      } else {
+        flags[arg.slice(2)] = "true";
+      }
+    } else {
+      positional.push(arg);
+    }
+    i++;
+  }
+  return { positional, flags };
+}
+async function loginFromConfig() {
+  const cfg2 = loadConfig();
+  await login(cfg2.url, cfg2.username, cfg2.password);
+}
+async function runDashboard() {
+  await loginFromConfig();
+  const { getMe: getMe2 } = await Promise.resolve().then(() => (init_api(), api_exports));
+  const text = await dashboard(api, getMe2());
+  console.log(text);
+}
+async function runGetItem(rawArgs) {
+  const { positional } = parseFlags(rawArgs);
+  const id = Number(positional[0]);
+  if (!id) die("Usage: viot-tasktisk get-item <item_id>");
+  await loginFromConfig();
+  const text = await getItem(api, { id });
+  console.log(text);
+}
+async function runAddTask(rawArgs) {
+  const { positional, flags } = parseFlags(rawArgs);
+  const itemId = Number(positional[0]);
+  const title = positional.slice(1).join(" ") || flags["title"];
+  if (!itemId || !title) {
+    die("Usage: viot-tasktisk add-task <item_id> <title> [--due YYYY-MM-DD] [--priority TB|Cao|Th\u1EA5p] [--assignee <user_id>]");
+  }
+  await loginFromConfig();
+  const text = await addTask(api, {
+    item_id: itemId,
+    title,
+    due: flags["due"],
+    priority: flags["priority"],
+    assignee: flags["assignee"] ? Number(flags["assignee"]) : void 0,
+    descr: flags["descr"] ?? flags["description"]
+  });
+  console.log(text);
+}
+async function runUpdateTask(rawArgs) {
+  const { positional } = parseFlags(rawArgs);
+  const id = Number(positional[0]);
+  const status = positional[1];
+  if (!id || !status) {
+    die('Usage: viot-tasktisk update-task <task_id> <status>\nStatuses: Plan \xB7 Todo \xB7 Doing \xB7 Done \xB7 Close \xB7 "Need help"');
+  }
+  await loginFromConfig();
+  const text = await updateWork(api, { id, kind: "task", status });
+  console.log(text);
+}
+async function runUpdateItem(rawArgs) {
+  const { positional } = parseFlags(rawArgs);
+  const id = Number(positional[0]);
+  const status = positional[1];
+  if (!id || !status) {
+    die("Usage: viot-tasktisk update-item <item_id> <status>\nStatuses: Todo \xB7 Doing \xB7 Review \xB7 Done \xB7 Cancelled");
+  }
+  await loginFromConfig();
+  const text = await updateWork(api, { id, kind: "item", status });
+  console.log(text);
+}
+function printHelp() {
+  console.log(`viot-tasktisk \u2014 qlda-viot task tracking
+
+MCP server (default, no subcommand):
+  viot-tasktisk                       Start MCP server for Claude
+
+Setup:
+  viot-tasktisk setup                 Interactive setup wizard
+  viot-tasktisk configure             Re-configure Claude integrations only
+  viot-tasktisk update                Update to the latest version
+
+Direct CLI commands (no MCP client needed):
+  viot-tasktisk dashboard             Show your personal task dashboard
+  viot-tasktisk my-tasks              Alias for dashboard
+  viot-tasktisk get-item <id>         Show item detail with all child tasks
+  viot-tasktisk add-task <item_id> <title> [options]
+                                      Create a task under an item
+    --due YYYY-MM-DD                  Due date
+    --priority TB|Cao|Th\u1EA5p            Priority
+    --assignee <user_id>              Assign to user
+    --descr <text>                    Description
+  viot-tasktisk update-task <id> <status>
+                                      Update task status
+                                      (Plan/Todo/Doing/Done/Close/Need help)
+  viot-tasktisk update-item <id> <status>
+                                      Update item status
+                                      (Todo/Doing/Review/Done/Cancelled)
+
+Environment variables override config file:
+  QLDA_URL, QLDA_USERNAME, QLDA_PASSWORD
+`);
+}
+var init_cli = __esm({
+  "src/cli.ts"() {
+    "use strict";
+    init_api();
+    init_skills();
+    init_config();
+  }
+});
+
 // src/index.ts
+init_api();
+init_skills();
+init_config();
+init_update();
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
-
-// src/api.ts
-var token = null;
-var currentUser = null;
-var baseUrl = "";
-async function login(base, username, password) {
-  baseUrl = base.replace(/\/$/, "");
-  const res = await fetch(`${baseUrl}/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password })
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error ?? `Login failed: HTTP ${res.status}`);
-  }
-  const data = await res.json();
-  token = data.token;
-  currentUser = data.user;
-  return data.user;
-}
-async function api(method, path, body) {
-  const res = await fetch(`${baseUrl}${path}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`
-    },
-    body: body !== void 0 ? JSON.stringify(body) : void 0
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error ?? `HTTP ${res.status} ${res.statusText}`);
-  }
-  return res.json();
-}
-function getMe() {
-  return currentUser;
-}
-
-// src/skills.ts
-init_update();
-function currentWeek() {
-  const d = /* @__PURE__ */ new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
-  const yearStart = new Date(d.getFullYear(), 0, 1);
-  const weekNo = Math.ceil(((+d - +yearStart) / 864e5 + 1) / 7);
-  return `${d.getFullYear()}-W${String(weekNo).padStart(2, "0")}`;
-}
-function todayStr() {
-  return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-}
-function weekEndStr() {
-  const d = /* @__PURE__ */ new Date();
-  const day = d.getDay() || 7;
-  d.setDate(d.getDate() + (7 - day));
-  return d.toISOString().slice(0, 10);
-}
-function fmtTask(t) {
-  const parts = [`[task:${t.id}] ${t.title}`, `(${t.status ?? "Todo"})`];
-  if (t.pname) parts.push(`\xB7 proj:${t.pname}`);
-  if (t.feature_name) parts.push(`> feat:${t.feature_name}`);
-  if (t.item_title) parts.push(`> item:${t.item_title}`);
-  if (t.due) parts.push(`due:${t.due}`);
-  if (t.priority === "Cao") parts.push("[HIGH]");
-  return parts.join(" ");
-}
-async function dashboard(apiFn, me) {
-  const [tasks, prio] = await Promise.all([
-    apiFn("GET", "/mytasks"),
-    apiFn("GET", `/priorities?week=${currentWeek()}`).catch(
-      () => ({ week: currentWeek(), items: [] })
-    )
-  ]);
-  const tod = todayStr();
-  const wend = weekEndStr();
-  const doneStatuses = /* @__PURE__ */ new Set(["Done", "Close", "Cancelled"]);
-  const active = tasks.filter((t) => !doneStatuses.has(t.status ?? ""));
-  const overdue = active.filter((t) => t.due && t.due < tod);
-  const dueToday = active.filter((t) => t.due === tod);
-  const dueWeek = active.filter((t) => t.due && t.due > tod && t.due <= wend);
-  const later = active.filter((t) => !t.due || t.due > wend);
-  const finished = tasks.filter((t) => doneStatuses.has(t.status ?? ""));
-  const newVersion = getUpdateAvailable();
-  const lines = [
-    `# Dashboard \u2014 ${me?.name ?? "Me"} \xB7 ${tod} (${prio.week})`,
-    ...newVersion ? [`
-> \u2B06\uFE0F  Update available: ${getLocalVersion()} \u2192 **${newVersion}** \u2014 run \`viot-tasktisk update\` then restart Claude Desktop.`] : [],
-    ""
-  ];
-  if (overdue.length) {
-    lines.push(`## \u{1F534} Overdue (${overdue.length})`);
-    overdue.forEach((t) => lines.push("- " + fmtTask(t)));
-    lines.push("");
-  }
-  if (dueToday.length) {
-    lines.push(`## \u{1F7E1} Due Today (${dueToday.length})`);
-    dueToday.forEach((t) => lines.push("- " + fmtTask(t)));
-    lines.push("");
-  }
-  if (dueWeek.length) {
-    lines.push(`## \u{1F7E2} This Week (${dueWeek.length})`);
-    dueWeek.forEach((t) => lines.push("- " + fmtTask(t)));
-    lines.push("");
-  }
-  if (later.length) {
-    lines.push(`## \u2B1C Later / No Due (${later.length})`);
-    later.forEach((t) => lines.push("- " + fmtTask(t)));
-    lines.push("");
-  }
-  if (finished.length) {
-    lines.push(`## \u2705 Done / Closed (${finished.length})`);
-    finished.forEach((t) => lines.push("- " + fmtTask(t)));
-    lines.push("");
-  }
-  if (!tasks.length) lines.push("_No tasks assigned to you._");
-  const prioItems = prio.items ?? [];
-  if (prioItems.length) {
-    lines.push(`## \u{1F4CC} Weekly Priorities (${prio.week})`);
-    [...prioItems].sort((a, b) => a.rank - b.rank).forEach((p) => {
-      const label = p.project_name ?? "\u2014";
-      const note = p.note ? ` \u2014 ${p.note}` : "";
-      lines.push(`${p.rank}. ${label}${note}`);
-    });
-  }
-  return lines.join("\n");
-}
-async function updateWork(apiFn, args) {
-  const { id, kind, status, due, priority } = args;
-  const path = kind === "task" ? `/tasks/${id}` : `/items/${id}`;
-  const patch = { status };
-  if (due !== void 0) patch.due = due;
-  if (priority !== void 0) patch.priority = priority;
-  const result = await apiFn("PATCH", path, patch);
-  const parts = [`Updated ${kind} #${id} \u2192 ${result.status ?? status}`];
-  if (result.due) parts.push(`due:${result.due}`);
-  if (result.priority) parts.push(`priority:${result.priority}`);
-  if (result.done_at) parts.push(`done_at:${result.done_at}`);
-  return parts.join(" \xB7 ");
-}
-async function addTask(apiFn, args) {
-  const { item_id, title, descr, due, priority, assignee } = args;
-  const payload = { title };
-  if (descr) payload.descr = descr;
-  if (due) payload.due = due;
-  if (priority) payload.priority = priority;
-  if (assignee != null) payload.assignee = assignee;
-  const task = await apiFn("POST", `/items/${item_id}/tasks`, payload);
-  return `Created task #${task.id}: "${task.title}" under item #${item_id}` + (task.due ? ` \xB7 due:${task.due}` : "");
-}
-async function getItem(apiFn, { id }) {
-  const item = await apiFn("GET", `/items/${id}`);
-  const lines = [
-    `# Item #${item.id}: ${item.title}`,
-    `Type: ${item.type} | Status: ${item.status} | Priority: ${item.priority}`,
-    `Feature: ${item.feature_name ?? "\u2014"} | Sprint: ${item.sprint_name ?? "none"}`,
-    `Assignee: ${item.assignee_name ?? "unassigned"}`,
-    `Progress: ${item.task_done}/${item.task_total} tasks (${item.task_pct}%)`
-  ];
-  if (item.description) lines.push("", `Description: ${item.description}`);
-  if (item.acceptance_criteria) lines.push("", `Acceptance criteria: ${item.acceptance_criteria}`);
-  const tasks = item.tasks ?? [];
-  if (tasks.length) {
-    lines.push("", `## Tasks (${tasks.length})`);
-    tasks.forEach((t) => {
-      const due = t.due ? ` due:${t.due}` : "";
-      const hi = t.priority === "Cao" ? " [HIGH]" : "";
-      lines.push(`- [task:${t.id}] [${t.status ?? "Todo"}] ${t.title}${due}${hi}`);
-    });
-  } else {
-    lines.push("", "_No tasks yet._");
-  }
-  return lines.join("\n");
-}
-
-// src/index.ts
-init_config();
-init_update();
 var subcommand = process.argv[2];
+var subArgs = process.argv.slice(3);
 if (subcommand === "setup") {
   const { runSetup: runSetup2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));
   await runSetup2();
@@ -595,10 +743,9 @@ if (subcommand === "setup") {
 }
 if (subcommand === "configure") {
   const { runConfigure: runConfigure2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));
-  const { loadConfig: loadConfig2 } = await Promise.resolve().then(() => (init_config(), config_exports));
   let prefix;
   try {
-    prefix = loadConfig2().installPrefix;
+    prefix = loadConfig().installPrefix;
   } catch {
   }
   await runConfigure2(prefix);
@@ -607,6 +754,36 @@ if (subcommand === "configure") {
 if (subcommand === "update") {
   const { runUpdate: runUpdate2 } = await Promise.resolve().then(() => (init_update(), update_exports));
   await runUpdate2();
+  process.exit(0);
+}
+if (subcommand === "dashboard" || subcommand === "my-tasks") {
+  const { runDashboard: runDashboard2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+  await runDashboard2();
+  process.exit(0);
+}
+if (subcommand === "get-item") {
+  const { runGetItem: runGetItem2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+  await runGetItem2(subArgs);
+  process.exit(0);
+}
+if (subcommand === "add-task") {
+  const { runAddTask: runAddTask2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+  await runAddTask2(subArgs);
+  process.exit(0);
+}
+if (subcommand === "update-task") {
+  const { runUpdateTask: runUpdateTask2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+  await runUpdateTask2(subArgs);
+  process.exit(0);
+}
+if (subcommand === "update-item") {
+  const { runUpdateItem: runUpdateItem2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+  await runUpdateItem2(subArgs);
+  process.exit(0);
+}
+if (subcommand === "--help" || subcommand === "-h" || subcommand === "help") {
+  const { printHelp: printHelp2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+  printHelp2();
   process.exit(0);
 }
 var cfg;
