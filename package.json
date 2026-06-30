@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "build": "tsup",
+    "prepare": "node node_modules/tsup/dist/cli-default.js",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test:smoke": "tsx tests/smoke.ts"
