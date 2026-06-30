@@ -11,6 +11,11 @@ var __export = (target, all) => {
 };
 
 // src/config.ts
+var config_exports = {};
+__export(config_exports, {
+  CONFIG_PATH: () => CONFIG_PATH,
+  loadConfig: () => loadConfig
+});
 import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
@@ -144,14 +149,73 @@ var init_update = __esm({
   }
 });
 
+// src/claude-config.ts
+import { readFileSync as readFileSync3, writeFileSync, mkdirSync, existsSync } from "fs";
+import { homedir as homedir3, platform } from "os";
+import { join as join3, dirname } from "path";
+function claudeDesktopTarget() {
+  const p = platform();
+  let configPath;
+  if (p === "darwin") {
+    configPath = join3(homedir3(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
+  } else if (p === "win32") {
+    configPath = join3(process.env.APPDATA ?? join3(homedir3(), "AppData", "Roaming"), "Claude", "claude_desktop_config.json");
+  } else {
+    configPath = join3(homedir3(), ".config", "Claude", "claude_desktop_config.json");
+  }
+  return { name: "Claude Desktop", configPath };
+}
+function claudeCodeTarget() {
+  return {
+    name: "Claude Code",
+    configPath: join3(homedir3(), ".claude", "settings.json")
+  };
+}
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync3(path, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+function injectMcpServer(target, command) {
+  const cfg2 = readJson(target.configPath);
+  const existing = cfg2.mcpServers ?? {};
+  cfg2.mcpServers = { ...existing, "viot-tasks": { command } };
+  mkdirSync(dirname(target.configPath), { recursive: true });
+  writeFileSync(target.configPath, JSON.stringify(cfg2, null, 2) + "\n");
+}
+function isAlreadyConfigured(target) {
+  if (!existsSync(target.configPath)) return false;
+  try {
+    const cfg2 = JSON.parse(readFileSync3(target.configPath, "utf-8"));
+    const servers = cfg2.mcpServers;
+    return !!servers?.["viot-tasks"];
+  } catch {
+    return false;
+  }
+}
+function resolveCommand(installPrefix, target) {
+  if (!installPrefix) return "viot-tasktisk";
+  const fullPath = join3(installPrefix, "bin", "viot-tasktisk");
+  if (target.name === "Claude Code") return "viot-tasktisk";
+  return fullPath;
+}
+var init_claude_config = __esm({
+  "src/claude-config.ts"() {
+    "use strict";
+  }
+});
+
 // src/setup.ts
 var setup_exports = {};
 __export(setup_exports, {
+  runConfigure: () => runConfigure,
   runSetup: () => runSetup
 });
 import { createInterface } from "readline/promises";
-import { writeFileSync, mkdirSync, existsSync, readFileSync as readFileSync3 } from "fs";
-import { dirname } from "path";
+import { writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync as existsSync2, readFileSync as readFileSync4 } from "fs";
+import { dirname as dirname2 } from "path";
 function readPassword(prompt) {
   return new Promise((resolve) => {
     process.stdout.write(prompt);
@@ -183,12 +247,43 @@ function readPassword(prompt) {
     stdin.on("data", onData);
   });
 }
+async function runConfigure(installPrefix) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const targets = [claudeDesktopTarget(), claudeCodeTarget()];
+  let anyConfigured = false;
+  console.log("Configure Claude integrations:\n");
+  for (const target of targets) {
+    const already = isAlreadyConfigured(target);
+    const hint = already ? " (already configured \u2014 overwrite?)" : "";
+    const ans = await rl.question(`  ${target.name}${hint} [Y/n]: `);
+    if (/^n/i.test(ans.trim())) continue;
+    const command = resolveCommand(installPrefix, target);
+    injectMcpServer(target, command);
+    console.log(`  \u2713 ${target.name} \u2192 ${target.configPath}`);
+    if (command !== "viot-tasktisk") {
+      console.log(`    (using full path: ${command})`);
+    }
+    anyConfigured = true;
+  }
+  rl.close();
+  if (anyConfigured) {
+    console.log("\nRestart Claude Desktop / reload Claude Code to apply changes.");
+  } else {
+    console.log("\nNo changes made.");
+    console.log("Add manually to either config file:");
+    console.log(JSON.stringify(
+      { mcpServers: { "viot-tasks": { command: "viot-tasktisk" } } },
+      null,
+      2
+    ));
+  }
+}
 async function runSetup() {
   console.log("viot-tasktisk \u2014 setup wizard\n");
   let existing = {};
-  if (existsSync(CONFIG_PATH)) {
+  if (existsSync2(CONFIG_PATH)) {
     try {
-      existing = JSON.parse(readFileSync3(CONFIG_PATH, "utf-8"));
+      existing = JSON.parse(readFileSync4(CONFIG_PATH, "utf-8"));
       console.log(`Updating existing config: ${CONFIG_PATH}
 `);
     } catch {
@@ -201,7 +296,7 @@ async function runSetup() {
   const rawUser = await rl.question(`Username${existing.username ? ` [${existing.username}]` : ""}: `);
   const username = rawUser.trim() || existing.username || "";
   rl.close();
-  const password = await readPassword(`Password: `);
+  const password = await readPassword("Password: ");
   if (!username) {
     console.error("\nUsername is required.");
     process.exit(1);
@@ -212,23 +307,18 @@ async function runSetup() {
   }
   const installPrefix = process.env.VIOT_INSTALL_PREFIX?.trim() || existing.installPrefix;
   const config = { url, username, password, ...installPrefix ? { installPrefix } : {} };
-  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", { mode: 384 });
+  mkdirSync2(dirname2(CONFIG_PATH), { recursive: true });
+  writeFileSync2(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", { mode: 384 });
   console.log(`
-\u2713 Config saved to ${CONFIG_PATH}
+\u2713 Credentials saved to ${CONFIG_PATH}
 `);
-  console.log("Add this to your Claude Desktop config:\n");
-  console.log(JSON.stringify(
-    { mcpServers: { "viot-tasks": { command: "viot-tasktisk" } } },
-    null,
-    2
-  ));
-  console.log("\nThen restart Claude Desktop.");
+  await runConfigure(installPrefix);
 }
 var init_setup = __esm({
   "src/setup.ts"() {
     "use strict";
     init_config();
+    init_claude_config();
   }
 });
 
@@ -422,6 +512,17 @@ var subcommand = process.argv[2];
 if (subcommand === "setup") {
   const { runSetup: runSetup2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));
   await runSetup2();
+  process.exit(0);
+}
+if (subcommand === "configure") {
+  const { runConfigure: runConfigure2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));
+  const { loadConfig: loadConfig2 } = await Promise.resolve().then(() => (init_config(), config_exports));
+  let prefix;
+  try {
+    prefix = loadConfig2().installPrefix;
+  } catch {
+  }
+  await runConfigure2(prefix);
   process.exit(0);
 }
 if (subcommand === "update") {

@@ -3,6 +3,15 @@ import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { CONFIG_PATH } from './config.js';
 import type { Config } from './config.js';
+import {
+  claudeDesktopTarget,
+  claudeCodeTarget,
+  injectMcpServer,
+  isAlreadyConfigured,
+  resolveCommand,
+} from './claude-config.js';
+
+// ── Password input with * masking ─────────────────────────────────────────────
 
 function readPassword(prompt: string): Promise<string> {
   return new Promise((resolve) => {
@@ -37,6 +46,47 @@ function readPassword(prompt: string): Promise<string> {
   });
 }
 
+// ── Claude integration config step (reusable) ─────────────────────────────────
+
+export async function runConfigure(installPrefix?: string): Promise<void> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+
+  const targets = [claudeDesktopTarget(), claudeCodeTarget()];
+  let anyConfigured = false;
+
+  console.log('Configure Claude integrations:\n');
+
+  for (const target of targets) {
+    const already = isAlreadyConfigured(target);
+    const hint = already ? ' (already configured — overwrite?)' : '';
+    const ans = await rl.question(`  ${target.name}${hint} [Y/n]: `);
+    if (/^n/i.test(ans.trim())) continue;
+
+    const command = resolveCommand(installPrefix, target);
+    injectMcpServer(target, command);
+    console.log(`  ✓ ${target.name} → ${target.configPath}`);
+    if (command !== 'viot-tasktisk') {
+      console.log(`    (using full path: ${command})`);
+    }
+    anyConfigured = true;
+  }
+
+  rl.close();
+
+  if (anyConfigured) {
+    console.log('\nRestart Claude Desktop / reload Claude Code to apply changes.');
+  } else {
+    console.log('\nNo changes made.');
+    console.log('Add manually to either config file:');
+    console.log(JSON.stringify(
+      { mcpServers: { 'viot-tasks': { command: 'viot-tasktisk' } } },
+      null, 2
+    ));
+  }
+}
+
+// ── Full setup wizard (credentials + configure) ───────────────────────────────
+
 export async function runSetup(): Promise<void> {
   console.log('viot-tasktisk — setup wizard\n');
 
@@ -45,7 +95,7 @@ export async function runSetup(): Promise<void> {
     try {
       existing = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')) as Config;
       console.log(`Updating existing config: ${CONFIG_PATH}\n`);
-    } catch { /* ignore parse errors, start fresh */ }
+    } catch { /* start fresh */ }
   }
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -59,24 +109,17 @@ export async function runSetup(): Promise<void> {
 
   rl.close();
 
-  const password = await readPassword(`Password: `);
+  const password = await readPassword('Password: ');
 
   if (!username) { console.error('\nUsername is required.'); process.exit(1); }
   if (!password) { console.error('\nPassword is required.'); process.exit(1); }
 
-  // Preserve installPrefix set by install.sh (via VIOT_INSTALL_PREFIX env var)
-  // or already stored from a previous setup.
   const installPrefix = process.env.VIOT_INSTALL_PREFIX?.trim() || existing.installPrefix;
-
   const config: Config = { url, username, password, ...(installPrefix ? { installPrefix } : {}) };
+
   mkdirSync(dirname(CONFIG_PATH), { recursive: true });
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
+  console.log(`\n✓ Credentials saved to ${CONFIG_PATH}\n`);
 
-  console.log(`\n✓ Config saved to ${CONFIG_PATH}\n`);
-  console.log('Add this to your Claude Desktop config:\n');
-  console.log(JSON.stringify(
-    { mcpServers: { 'viot-tasks': { command: 'viot-tasktisk' } } },
-    null, 2
-  ));
-  console.log('\nThen restart Claude Desktop.');
+  await runConfigure(installPrefix);
 }

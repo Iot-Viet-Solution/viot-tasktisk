@@ -62,30 +62,29 @@ viot-tasktisk setup
 
 ---
 
-## Claude Desktop config
+## Claude integration
 
-After running setup, add this to your Claude Desktop config file:
+`viot-tasktisk setup` offers to auto-configure both Claude products at the end of the wizard.
+To re-run just the config step (without re-entering credentials):
 
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "viot-tasks": {
-      "command": "viot-tasktisk"
-    }
-  }
-}
+```bash
+viot-tasktisk configure
 ```
 
-Restart Claude Desktop. The server auto-logs in on start using the saved config.
+This writes `viot-tasks` into `mcpServers` in the appropriate config file for each product:
 
-> **User-local install on macOS/Linux**: if Claude Desktop doesn't pick up your PATH,
-> use the full binary path instead:
-> ```json
-> { "command": "/home/you/.npm-global/bin/viot-tasktisk" }
-> ```
+| Product | Config file |
+|---|---|
+| Claude Desktop (macOS) | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Claude Desktop (Windows) | `%APPDATA%\Claude\claude_desktop_config.json` |
+| Claude Desktop (Linux) | `~/.config/Claude/claude_desktop_config.json` |
+| Claude Code (CLI) | `~/.claude/settings.json` |
+
+Restart Claude Desktop / reload Claude Code after configuring.
+
+> **User-local install**: `configure` automatically uses the full binary path
+> (`~/.npm-global/bin/viot-tasktisk`) for Claude Desktop, which doesn't inherit your shell
+> PATH. Claude Code runs in the terminal so it always uses the short name.
 
 ---
 

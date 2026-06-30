@@ -19,6 +19,16 @@ if (subcommand === 'setup') {
   process.exit(0);
 }
 
+if (subcommand === 'configure') {
+  // Re-run only the Claude integration step (skip credential prompts)
+  const { runConfigure } = await import('./setup.js');
+  const { loadConfig } = await import('./config.js');
+  let prefix: string | undefined;
+  try { prefix = loadConfig().installPrefix; } catch { /* ok */ }
+  await runConfigure(prefix);
+  process.exit(0);
+}
+
 if (subcommand === 'update') {
   const { runUpdate } = await import('./update.js');
   await runUpdate();
