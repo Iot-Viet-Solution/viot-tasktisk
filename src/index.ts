@@ -7,20 +7,26 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { login, api, getMe } from './api.js';
 import { dashboard, updateWork, addTask, getItem } from './skills.js';
+import { loadConfig } from './config.js';
 import type { UpdateWorkArgs, AddTaskArgs } from './skills.js';
 
-const BASE = process.env.QLDA_URL ?? 'http://localhost:3100';
-const USER = process.env.QLDA_USERNAME;
-const PASS = process.env.QLDA_PASSWORD;
+if (process.argv[2] === 'setup') {
+  const { runSetup } = await import('./setup.js');
+  await runSetup();
+  process.exit(0);
+}
 
-if (!USER || !PASS) {
-  process.stderr.write('Error: QLDA_USERNAME and QLDA_PASSWORD env vars are required.\n');
+let cfg;
+try {
+  cfg = loadConfig();
+} catch (e) {
+  process.stderr.write(`${(e as Error).message}\n`);
   process.exit(1);
 }
 
 try {
-  const me = await login(BASE, USER, PASS);
-  process.stderr.write(`Logged in as ${me.name} (${me.role})\n`);
+  const me = await login(cfg.url, cfg.username, cfg.password);
+  process.stderr.write(`viot-tasktisk: logged in as ${me.name} (${me.role})\n`);
 } catch (e) {
   process.stderr.write(`Login failed: ${(e as Error).message}\n`);
   process.exit(1);
@@ -37,7 +43,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: 'dashboard',
       description:
         'Get your personal task dashboard: tasks grouped by urgency (overdue / due today / ' +
-        'this week / later / done) plus the team\'s weekly priorities. ' +
+        "this week / later / done) plus the team's weekly priorities. " +
         'Call this first to understand what to work on.',
       inputSchema: { type: 'object' as const, properties: {} },
     },
@@ -96,20 +102,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   try {
     let text: string;
     switch (name) {
-      case 'dashboard':
-        text = await dashboard(api, getMe());
-        break;
-      case 'update_work':
-        text = await updateWork(api, args as unknown as UpdateWorkArgs);
-        break;
-      case 'get_item':
-        text = await getItem(api, args as { id: number });
-        break;
-      case 'add_task':
-        text = await addTask(api, args as unknown as AddTaskArgs);
-        break;
-      default:
-        throw new Error(`Unknown tool: ${name}`);
+      case 'dashboard':   text = await dashboard(api, getMe()); break;
+      case 'update_work': text = await updateWork(api, args as unknown as UpdateWorkArgs); break;
+      case 'get_item':    text = await getItem(api, args as { id: number }); break;
+      case 'add_task':    text = await addTask(api, args as unknown as AddTaskArgs); break;
+      default: throw new Error(`Unknown tool: ${name}`);
     }
     return { content: [{ type: 'text' as const, text }] };
   } catch (e) {

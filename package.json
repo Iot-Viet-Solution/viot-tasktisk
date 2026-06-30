@@ -3,8 +3,12 @@
   "version": "1.0.0",
   "description": "MCP server for qlda-viot task tracking",
   "type": "module",
+  "bin": {
+    "viot-tasktisk": "./dist/index.js"
+  },
   "scripts": {
-    "start": "tsx src/index.ts",
+    "build": "tsup",
+    "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -12,6 +16,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.0.1",
+    "tsup": "^8.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0"
   }
