@@ -4,8 +4,7 @@ import { dirname } from 'node:path';
 import { CONFIG_PATH } from './config.js';
 import type { Config } from './config.js';
 import {
-  claudeDesktopTarget,
-  claudeCodeTarget,
+  allTargets,
   injectMcpServer,
   isAlreadyConfigured,
   resolveCommand,
@@ -51,7 +50,7 @@ function readPassword(prompt: string): Promise<string> {
 export async function runConfigure(installPrefix?: string): Promise<void> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
-  const targets = [claudeDesktopTarget(), claudeCodeTarget()];
+  const targets = allTargets();
   let anyConfigured = false;
 
   console.log('Configure Claude integrations:\n');

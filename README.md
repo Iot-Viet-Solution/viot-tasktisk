@@ -73,12 +73,15 @@ viot-tasktisk configure
 
 This writes `viot-tasks` into `mcpServers` in the appropriate config file for each product:
 
-| Product | Config file |
-|---|---|
-| Claude Desktop (macOS) | `~/Library/Application Support/Claude/claude_desktop_config.json` |
-| Claude Desktop (Windows) | `%APPDATA%\Claude\claude_desktop_config.json` |
-| Claude Desktop (Linux) | `~/.config/Claude/claude_desktop_config.json` |
-| Claude Code (CLI) | `~/.claude/settings.json` |
+| Product | Config file | Format |
+|---|---|---|
+| Claude Desktop (macOS) | `~/Library/Application Support/Claude/claude_desktop_config.json` | JSON `mcpServers` |
+| Claude Desktop (Windows) | `%APPDATA%\Claude\claude_desktop_config.json` | JSON `mcpServers` |
+| Claude Desktop (Linux) | `~/.config/Claude/claude_desktop_config.json` | JSON `mcpServers` |
+| Claude Code (CLI) | `~/.claude/settings.json` | JSON `mcpServers` |
+| VS Code | platform user `settings.json` | JSON `mcp.servers` |
+| Antigravity CLI (Google) | `~/.gemini/config/mcp_config.json` | JSON `mcpServers` |
+| Codex CLI (OpenAI) | `~/.codex/config.toml` | TOML `[mcp_servers.viot-tasks]` |
 
 Restart Claude Desktop / reload Claude Code after configuring.
 

@@ -163,13 +163,45 @@ function claudeDesktopTarget() {
   } else {
     configPath = join3(homedir3(), ".config", "Claude", "claude_desktop_config.json");
   }
-  return { name: "Claude Desktop", configPath };
+  return { name: "Claude Desktop", configPath, format: "mcp-servers" };
 }
 function claudeCodeTarget() {
+  return { name: "Claude Code", configPath: join3(homedir3(), ".claude", "settings.json"), format: "mcp-servers" };
+}
+function vscodeTarget() {
+  const p = platform();
+  let configPath;
+  if (p === "darwin") {
+    configPath = join3(homedir3(), "Library", "Application Support", "Code", "User", "settings.json");
+  } else if (p === "win32") {
+    configPath = join3(process.env.APPDATA ?? join3(homedir3(), "AppData", "Roaming"), "Code", "User", "settings.json");
+  } else {
+    configPath = join3(homedir3(), ".config", "Code", "User", "settings.json");
+  }
+  return { name: "VS Code", configPath, format: "vscode" };
+}
+function antigravityTarget() {
   return {
-    name: "Claude Code",
-    configPath: join3(homedir3(), ".claude", "settings.json")
+    name: "Antigravity CLI (Google)",
+    configPath: join3(homedir3(), ".gemini", "config", "mcp_config.json"),
+    format: "mcp-servers"
   };
+}
+function codexTarget() {
+  return {
+    name: "Codex CLI (OpenAI)",
+    configPath: join3(homedir3(), ".codex", "config.toml"),
+    format: "toml"
+  };
+}
+function allTargets() {
+  return [
+    claudeDesktopTarget(),
+    claudeCodeTarget(),
+    vscodeTarget(),
+    antigravityTarget(),
+    codexTarget()
+  ];
 }
 function readJson(path) {
   try {
@@ -178,28 +210,75 @@ function readJson(path) {
     return {};
   }
 }
+function writeJson(path, data) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
+}
+function readToml(path) {
+  try {
+    return readFileSync3(path, "utf-8");
+  } catch {
+    return "";
+  }
+}
+function tomlHasSection(content, serverName) {
+  return content.includes(`[mcp_servers.${serverName}]`);
+}
+function injectToml(filePath, serverName, command) {
+  let content = readToml(filePath);
+  const section = `[mcp_servers.${serverName}]`;
+  if (tomlHasSection(content, serverName)) {
+    content = content.replace(
+      new RegExp(
+        `(\\[mcp_servers\\.${serverName.replace(/\./g, "\\.")}\\][\\s\\S]*?\\ncommand\\s*=\\s*)("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|[^\\s"'][^\\n]*)`
+      ),
+      `$1"${command}"`
+    );
+  } else {
+    if (content && !content.endsWith("\n")) content += "\n";
+    content += `
+${section}
+command = "${command}"
+`;
+  }
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, content);
+}
 function injectMcpServer(target, command) {
+  if (target.format === "toml") {
+    injectToml(target.configPath, "viot-tasks", command);
+    return;
+  }
   const cfg2 = readJson(target.configPath);
-  const existing = cfg2.mcpServers ?? {};
-  cfg2.mcpServers = { ...existing, "viot-tasks": { command } };
-  mkdirSync(dirname(target.configPath), { recursive: true });
-  writeFileSync(target.configPath, JSON.stringify(cfg2, null, 2) + "\n");
+  if (target.format === "vscode") {
+    const mcp = cfg2.mcp ?? {};
+    const servers = mcp.servers ?? {};
+    cfg2.mcp = { ...mcp, servers: { ...servers, "viot-tasks": { type: "stdio", command } } };
+  } else {
+    const servers = cfg2.mcpServers ?? {};
+    cfg2.mcpServers = { ...servers, "viot-tasks": { command } };
+  }
+  writeJson(target.configPath, cfg2);
 }
 function isAlreadyConfigured(target) {
   if (!existsSync(target.configPath)) return false;
   try {
-    const cfg2 = JSON.parse(readFileSync3(target.configPath, "utf-8"));
-    const servers = cfg2.mcpServers;
-    return !!servers?.["viot-tasks"];
+    if (target.format === "toml") {
+      return tomlHasSection(readToml(target.configPath), "viot-tasks");
+    }
+    const cfg2 = readJson(target.configPath);
+    if (target.format === "vscode") {
+      const servers = cfg2.mcp?.servers ?? {};
+      return !!servers["viot-tasks"];
+    }
+    return !!(cfg2.mcpServers ?? {})["viot-tasks"];
   } catch {
     return false;
   }
 }
 function resolveCommand(installPrefix, target) {
-  if (!installPrefix) return "viot-tasktisk";
-  const fullPath = join3(installPrefix, "bin", "viot-tasktisk");
-  if (target.name === "Claude Code") return "viot-tasktisk";
-  return fullPath;
+  if (!installPrefix || target.name !== "Claude Desktop") return "viot-tasktisk";
+  return join3(installPrefix, "bin", "viot-tasktisk");
 }
 var init_claude_config = __esm({
   "src/claude-config.ts"() {
@@ -249,7 +328,7 @@ function readPassword(prompt) {
 }
 async function runConfigure(installPrefix) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const targets = [claudeDesktopTarget(), claudeCodeTarget()];
+  const targets = allTargets();
   let anyConfigured = false;
   console.log("Configure Claude integrations:\n");
   for (const target of targets) {
