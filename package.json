@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "prepare": "node node_modules/tsup/dist/cli-default.js",
+    "prepare": "node -e \"const fs=require('fs');if(!fs.existsSync('dist/index.js')){require('child_process').execSync('node node_modules/tsup/dist/cli-default.js',{stdio:'inherit'})}\"",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test:smoke": "tsx tests/smoke.ts"
