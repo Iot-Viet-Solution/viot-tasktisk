@@ -64,7 +64,11 @@ export async function runSetup(): Promise<void> {
   if (!username) { console.error('\nUsername is required.'); process.exit(1); }
   if (!password) { console.error('\nPassword is required.'); process.exit(1); }
 
-  const config: Config = { url, username, password };
+  // Preserve installPrefix set by install.sh (via VIOT_INSTALL_PREFIX env var)
+  // or already stored from a previous setup.
+  const installPrefix = process.env.VIOT_INSTALL_PREFIX?.trim() || existing.installPrefix;
+
+  const config: Config = { url, username, password, ...(installPrefix ? { installPrefix } : {}) };
   mkdirSync(dirname(CONFIG_PATH), { recursive: true });
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
 

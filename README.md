@@ -102,6 +102,15 @@ viot-tasktisk
 
 ---
 
+## Update
+
+```bash
+viot-tasktisk update
+```
+
+Pulls the latest version from GitHub and reinstalls using the same prefix (global or user-local)
+that was used when you first installed. Prints a reminder to restart Claude Desktop.
+
 ## Re-configure
 
 ```bash

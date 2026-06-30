@@ -10,9 +10,17 @@ import { dashboard, updateWork, addTask, getItem } from './skills.js';
 import { loadConfig } from './config.js';
 import type { UpdateWorkArgs, AddTaskArgs } from './skills.js';
 
-if (process.argv[2] === 'setup') {
+const subcommand = process.argv[2];
+
+if (subcommand === 'setup') {
   const { runSetup } = await import('./setup.js');
   await runSetup();
+  process.exit(0);
+}
+
+if (subcommand === 'update') {
+  const { runUpdate } = await import('./update.js');
+  await runUpdate();
   process.exit(0);
 }
 

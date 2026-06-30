@@ -6,6 +6,8 @@ export interface Config {
   url: string;
   username: string;
   password: string;
+  /** npm prefix used at install time. undefined = global, path = user-local. */
+  installPrefix?: string;
 }
 
 export const CONFIG_PATH = join(homedir(), '.config', 'viot-tasktisk', 'config.json');

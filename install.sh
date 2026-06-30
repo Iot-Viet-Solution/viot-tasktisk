@@ -91,4 +91,10 @@ esac
 
 echo ""
 printf "$(green '✓') Installed. Running setup...\n\n"
-viot-tasktisk setup
+
+# Pass the install prefix so setup can save it for future `viot-tasktisk update` calls.
+if [ "$choice" = "2" ]; then
+  VIOT_INSTALL_PREFIX="$USER_PREFIX" viot-tasktisk setup
+else
+  viot-tasktisk setup
+fi
