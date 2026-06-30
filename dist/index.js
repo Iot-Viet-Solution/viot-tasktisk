@@ -147,21 +147,26 @@ function resolvePrefix() {
 async function runUpdate() {
   console.log("viot-tasktisk \u2014 update\n");
   console.log(`Current version : ${LOCAL_VERSION}`);
+  let remoteVersion;
   try {
     const res = await fetch(REMOTE_PKG, { signal: AbortSignal.timeout(6e3) });
     if (res.ok) {
-      const remote = await res.json();
-      if (remote.version) {
-        if (remote.version === LOCAL_VERSION) {
-          console.log(`Remote version  : ${remote.version} (already up to date)`);
-          return;
-        }
-        console.log(`Remote version  : ${remote.version} \u2190 installing this`);
-      }
+      const pkg = await res.json();
+      remoteVersion = pkg.version;
     }
   } catch {
-    console.log("Remote version  : (could not fetch, proceeding anyway)");
   }
+  if (remoteVersion) {
+    if (remoteVersion === LOCAL_VERSION) {
+      console.log(`Remote version  : ${remoteVersion} (already up to date)`);
+      return;
+    }
+    console.log(`Remote version  : ${remoteVersion} \u2190 installing this`);
+  } else {
+    console.log("Remote version  : (could not fetch, proceeding anyway)");
+    remoteVersion = LOCAL_VERSION;
+  }
+  const tarballUrl = `${RELEASE_BASE}/v${remoteVersion}/viot-tasktisk-${remoteVersion}.tgz`;
   const prefix = resolvePrefix();
   const npmArgs = ["install", "-g"];
   if (prefix) {
@@ -170,7 +175,7 @@ async function runUpdate() {
   } else {
     console.log("Install mode    : global");
   }
-  npmArgs.push(REPO);
+  npmArgs.push(tarballUrl);
   console.log(`
 Running: npm ${npmArgs.join(" ")}
 `);
@@ -183,14 +188,14 @@ Running: npm ${npmArgs.join(" ")}
   console.log("\n\u2713 Updated successfully.");
   console.log("  Restart Claude Desktop to load the new version.");
 }
-var LOCAL_VERSION, REPO, REMOTE_PKG, _updateAvailable;
+var LOCAL_VERSION, REMOTE_PKG, RELEASE_BASE, _updateAvailable;
 var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
     LOCAL_VERSION = true ? "1.0.0" : "dev";
-    REPO = "github:Iot-Viet-Solution/viot-tasktisk";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
+    RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
   }
 });

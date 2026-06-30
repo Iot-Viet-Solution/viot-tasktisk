@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-REPO="github:Iot-Viet-Solution/viot-tasktisk"
+REPO="https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.0.0.tgz"
 USER_PREFIX="$HOME/.npm-global"
 
 # ── helpers ──────────────────────────────────────────────────────────────────

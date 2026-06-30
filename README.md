@@ -12,11 +12,13 @@ Exposes 4 high-level skills to Claude — no raw API fiddling needed.
 
 ---
 
-## Install (macOS / Linux)
+## Install
 
 **Requires Node.js ≥ 20.**
 
-Run the installer — it asks whether to install globally (all users) or for the current user only,
+### macOS / Linux
+
+Run the installer — it asks whether to install globally or for the current user only,
 then launches the setup wizard:
 
 ```bash
@@ -40,23 +42,23 @@ The wizard prints the exact snippet to paste into Claude Desktop when done.
 | Install prefix | system npm global | `~/.npm-global` |
 | PATH change needed | No | Yes (installer offers to do it) |
 
+### Windows
+
+```powershell
+npm install -g https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.0.0.tgz
+viot-tasktisk setup
+```
+
 ### Manual install (without the script)
 
 ```bash
 # Global
-npm install -g github:Iot-Viet-Solution/viot-tasktisk
+npm install -g https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.0.0.tgz
 viot-tasktisk setup
 
 # User-local
-npm install -g --prefix ~/.npm-global github:Iot-Viet-Solution/viot-tasktisk
+npm install -g --prefix ~/.npm-global https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.0.0.tgz
 export PATH="$HOME/.npm-global/bin:$PATH"   # add to ~/.zshrc or ~/.bashrc
-viot-tasktisk setup
-```
-
-### Windows
-
-```powershell
-npm install -g github:Iot-Viet-Solution/viot-tasktisk
 viot-tasktisk setup
 ```
 

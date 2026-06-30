@@ -10,9 +10,9 @@ declare const __PKG_VERSION__: string;
 const LOCAL_VERSION: string =
   typeof __PKG_VERSION__ !== 'undefined' ? __PKG_VERSION__ : 'dev';
 
-const REPO = 'github:Iot-Viet-Solution/viot-tasktisk';
 const REMOTE_PKG =
   'https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json';
+const RELEASE_BASE = 'https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download';
 
 // ── Update state (module-level, shared between startup check and skills) ──────
 
@@ -81,22 +81,27 @@ export async function runUpdate(): Promise<void> {
   console.log('viot-tasktisk — update\n');
   console.log(`Current version : ${LOCAL_VERSION}`);
 
-  // Peek at remote version first
+  let remoteVersion: string | undefined;
   try {
     const res = await fetch(REMOTE_PKG, { signal: AbortSignal.timeout(6000) });
     if (res.ok) {
-      const remote = (await res.json()) as { version?: string };
-      if (remote.version) {
-        if (remote.version === LOCAL_VERSION) {
-          console.log(`Remote version  : ${remote.version} (already up to date)`);
-          return;
-        }
-        console.log(`Remote version  : ${remote.version} ← installing this`);
-      }
+      const pkg = (await res.json()) as { version?: string };
+      remoteVersion = pkg.version;
     }
-  } catch {
+  } catch { /* network unavailable */ }
+
+  if (remoteVersion) {
+    if (remoteVersion === LOCAL_VERSION) {
+      console.log(`Remote version  : ${remoteVersion} (already up to date)`);
+      return;
+    }
+    console.log(`Remote version  : ${remoteVersion} ← installing this`);
+  } else {
     console.log('Remote version  : (could not fetch, proceeding anyway)');
+    remoteVersion = LOCAL_VERSION;
   }
+
+  const tarballUrl = `${RELEASE_BASE}/v${remoteVersion}/viot-tasktisk-${remoteVersion}.tgz`;
 
   const prefix = resolvePrefix();
   const npmArgs = ['install', '-g'];
@@ -106,7 +111,7 @@ export async function runUpdate(): Promise<void> {
   } else {
     console.log('Install mode    : global');
   }
-  npmArgs.push(REPO);
+  npmArgs.push(tarballUrl);
 
   console.log(`\nRunning: npm ${npmArgs.join(' ')}\n`);
 
