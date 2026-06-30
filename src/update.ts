@@ -1,13 +1,60 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { CONFIG_PATH } from './config.js';
 import type { Config } from './config.js';
 
-const REPO = 'github:Iot-Viet-Solution/viot-tasktisk';
+// Injected by tsup at build time
+declare const __PKG_VERSION__: string;
+const LOCAL_VERSION: string =
+  typeof __PKG_VERSION__ !== 'undefined' ? __PKG_VERSION__ : 'dev';
 
-/** Try to infer the install prefix from the binary's own path. */
+const REPO = 'github:Iot-Viet-Solution/viot-tasktisk';
+const REMOTE_PKG =
+  'https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json';
+
+// ── Update state (module-level, shared between startup check and skills) ──────
+
+let _updateAvailable: string | null = null;
+
+/** Returns the latest remote version if an update is available, else null. */
+export function getUpdateAvailable(): string | null {
+  return _updateAvailable;
+}
+
+export function getLocalVersion(): string {
+  return LOCAL_VERSION;
+}
+
+// ── Startup background check ──────────────────────────────────────────────────
+
+/**
+ * Fire-and-forget: fetch the remote package.json and compare versions.
+ * Never throws — network failures are silently ignored.
+ * Writes to stderr if an update is available (visible in Claude Desktop logs).
+ */
+export function startUpdateCheck(): void {
+  void (async () => {
+    try {
+      const res = await fetch(REMOTE_PKG, { signal: AbortSignal.timeout(6000) });
+      if (!res.ok) return;
+      const remote = (await res.json()) as { version?: string };
+      if (remote.version && remote.version !== LOCAL_VERSION) {
+        _updateAvailable = remote.version;
+        process.stderr.write(
+          `[viot-tasktisk] Update available: ${LOCAL_VERSION} → ${remote.version}\n` +
+          `  Run: viot-tasktisk update\n`,
+        );
+      }
+    } catch {
+      // Silently ignore — never disrupt server startup
+    }
+  })();
+}
+
+// ── npm install prefix resolution ─────────────────────────────────────────────
+
 function detectPrefixFromBinary(): string | undefined {
   const argv1 = process.argv[1] ?? '';
   const candidates = [
@@ -15,37 +62,53 @@ function detectPrefixFromBinary(): string | undefined {
     join(homedir(), '.npm'),
     join(homedir(), 'npm'),
     join(homedir(), '.local'),
-    join(homedir(), '.nvm'),   // nvm installs are per-user
+    join(homedir(), '.nvm'),
   ];
   return candidates.find(p => argv1.startsWith(p));
 }
 
 function resolvePrefix(): string | undefined {
-  // 1. Config file (written by install.sh → setup)
   try {
     const cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')) as Config;
     if (cfg.installPrefix) return cfg.installPrefix;
-  } catch { /* no config yet */ }
-
-  // 2. Fallback: sniff binary path
+  } catch { /* no config */ }
   return detectPrefixFromBinary();
 }
 
+// ── viot-tasktisk update ──────────────────────────────────────────────────────
+
 export async function runUpdate(): Promise<void> {
   console.log('viot-tasktisk — update\n');
+  console.log(`Current version : ${LOCAL_VERSION}`);
+
+  // Peek at remote version first
+  try {
+    const res = await fetch(REMOTE_PKG, { signal: AbortSignal.timeout(6000) });
+    if (res.ok) {
+      const remote = (await res.json()) as { version?: string };
+      if (remote.version) {
+        if (remote.version === LOCAL_VERSION) {
+          console.log(`Remote version  : ${remote.version} (already up to date)`);
+          return;
+        }
+        console.log(`Remote version  : ${remote.version} ← installing this`);
+      }
+    }
+  } catch {
+    console.log('Remote version  : (could not fetch, proceeding anyway)');
+  }
 
   const prefix = resolvePrefix();
-
   const npmArgs = ['install', '-g'];
   if (prefix) {
     npmArgs.push('--prefix', prefix);
-    console.log(`Install mode : user-local (${prefix})`);
+    console.log(`Install mode    : user-local (${prefix})`);
   } else {
-    console.log('Install mode : global');
+    console.log('Install mode    : global');
   }
   npmArgs.push(REPO);
 
-  console.log(`Running      : npm ${npmArgs.join(' ')}\n`);
+  console.log(`\nRunning: npm ${npmArgs.join(' ')}\n`);
 
   try {
     execFileSync('npm', npmArgs, { stdio: 'inherit' });

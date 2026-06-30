@@ -1,4 +1,5 @@
 import type { User } from './api.js';
+import { getUpdateAvailable, getLocalVersion } from './update.js';
 
 // ---- Types mirrored from qlda-viot domain ----
 
@@ -110,7 +111,14 @@ export async function dashboard(apiFn: ApiFn, me: User | null): Promise<string> 
   const later    = active.filter(t => !t.due || t.due > wend);
   const finished = tasks.filter(t => doneStatuses.has(t.status ?? ''));
 
-  const lines: string[] = [`# Dashboard — ${me?.name ?? 'Me'} · ${tod} (${prio.week})\n`];
+  const newVersion = getUpdateAvailable();
+  const lines: string[] = [
+    `# Dashboard — ${me?.name ?? 'Me'} · ${tod} (${prio.week})`,
+    ...(newVersion
+      ? [`\n> ⬆️  Update available: ${getLocalVersion()} → **${newVersion}** — run \`viot-tasktisk update\` then restart Claude Desktop.`]
+      : []),
+    '',
+  ];
 
   if (overdue.length) {
     lines.push(`## 🔴 Overdue (${overdue.length})`);

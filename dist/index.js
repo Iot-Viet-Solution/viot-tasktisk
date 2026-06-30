@@ -38,13 +38,119 @@ var init_config = __esm({
   }
 });
 
+// src/update.ts
+var update_exports = {};
+__export(update_exports, {
+  getLocalVersion: () => getLocalVersion,
+  getUpdateAvailable: () => getUpdateAvailable,
+  runUpdate: () => runUpdate,
+  startUpdateCheck: () => startUpdateCheck
+});
+import { execFileSync } from "child_process";
+import { readFileSync as readFileSync2 } from "fs";
+import { homedir as homedir2 } from "os";
+import { join as join2 } from "path";
+function getUpdateAvailable() {
+  return _updateAvailable;
+}
+function getLocalVersion() {
+  return LOCAL_VERSION;
+}
+function startUpdateCheck() {
+  void (async () => {
+    try {
+      const res = await fetch(REMOTE_PKG, { signal: AbortSignal.timeout(6e3) });
+      if (!res.ok) return;
+      const remote = await res.json();
+      if (remote.version && remote.version !== LOCAL_VERSION) {
+        _updateAvailable = remote.version;
+        process.stderr.write(
+          `[viot-tasktisk] Update available: ${LOCAL_VERSION} \u2192 ${remote.version}
+  Run: viot-tasktisk update
+`
+        );
+      }
+    } catch {
+    }
+  })();
+}
+function detectPrefixFromBinary() {
+  const argv1 = process.argv[1] ?? "";
+  const candidates = [
+    join2(homedir2(), ".npm-global"),
+    join2(homedir2(), ".npm"),
+    join2(homedir2(), "npm"),
+    join2(homedir2(), ".local"),
+    join2(homedir2(), ".nvm")
+  ];
+  return candidates.find((p) => argv1.startsWith(p));
+}
+function resolvePrefix() {
+  try {
+    const cfg2 = JSON.parse(readFileSync2(CONFIG_PATH, "utf-8"));
+    if (cfg2.installPrefix) return cfg2.installPrefix;
+  } catch {
+  }
+  return detectPrefixFromBinary();
+}
+async function runUpdate() {
+  console.log("viot-tasktisk \u2014 update\n");
+  console.log(`Current version : ${LOCAL_VERSION}`);
+  try {
+    const res = await fetch(REMOTE_PKG, { signal: AbortSignal.timeout(6e3) });
+    if (res.ok) {
+      const remote = await res.json();
+      if (remote.version) {
+        if (remote.version === LOCAL_VERSION) {
+          console.log(`Remote version  : ${remote.version} (already up to date)`);
+          return;
+        }
+        console.log(`Remote version  : ${remote.version} \u2190 installing this`);
+      }
+    }
+  } catch {
+    console.log("Remote version  : (could not fetch, proceeding anyway)");
+  }
+  const prefix = resolvePrefix();
+  const npmArgs = ["install", "-g"];
+  if (prefix) {
+    npmArgs.push("--prefix", prefix);
+    console.log(`Install mode    : user-local (${prefix})`);
+  } else {
+    console.log("Install mode    : global");
+  }
+  npmArgs.push(REPO);
+  console.log(`
+Running: npm ${npmArgs.join(" ")}
+`);
+  try {
+    execFileSync("npm", npmArgs, { stdio: "inherit" });
+  } catch {
+    console.error("\nUpdate failed. Try running the command above manually.");
+    process.exit(1);
+  }
+  console.log("\n\u2713 Updated successfully.");
+  console.log("  Restart Claude Desktop to load the new version.");
+}
+var LOCAL_VERSION, REPO, REMOTE_PKG, _updateAvailable;
+var init_update = __esm({
+  "src/update.ts"() {
+    "use strict";
+    init_config();
+    LOCAL_VERSION = true ? "1.0.0" : "dev";
+    REPO = "github:Iot-Viet-Solution/viot-tasktisk";
+    REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
+    _updateAvailable = null;
+  }
+});
+
 // src/setup.ts
 var setup_exports = {};
 __export(setup_exports, {
   runSetup: () => runSetup
 });
 import { createInterface } from "readline/promises";
-import { writeFileSync, mkdirSync, existsSync, readFileSync as readFileSync2 } from "fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync as readFileSync3 } from "fs";
 import { dirname } from "path";
 function readPassword(prompt) {
   return new Promise((resolve) => {
@@ -82,7 +188,7 @@ async function runSetup() {
   let existing = {};
   if (existsSync(CONFIG_PATH)) {
     try {
-      existing = JSON.parse(readFileSync2(CONFIG_PATH, "utf-8"));
+      existing = JSON.parse(readFileSync3(CONFIG_PATH, "utf-8"));
       console.log(`Updating existing config: ${CONFIG_PATH}
 `);
     } catch {
@@ -123,66 +229,6 @@ var init_setup = __esm({
   "src/setup.ts"() {
     "use strict";
     init_config();
-  }
-});
-
-// src/update.ts
-var update_exports = {};
-__export(update_exports, {
-  runUpdate: () => runUpdate
-});
-import { execFileSync } from "child_process";
-import { readFileSync as readFileSync3 } from "fs";
-import { homedir as homedir2 } from "os";
-import { join as join2 } from "path";
-function detectPrefixFromBinary() {
-  const argv1 = process.argv[1] ?? "";
-  const candidates = [
-    join2(homedir2(), ".npm-global"),
-    join2(homedir2(), ".npm"),
-    join2(homedir2(), "npm"),
-    join2(homedir2(), ".local"),
-    join2(homedir2(), ".nvm")
-    // nvm installs are per-user
-  ];
-  return candidates.find((p) => argv1.startsWith(p));
-}
-function resolvePrefix() {
-  try {
-    const cfg2 = JSON.parse(readFileSync3(CONFIG_PATH, "utf-8"));
-    if (cfg2.installPrefix) return cfg2.installPrefix;
-  } catch {
-  }
-  return detectPrefixFromBinary();
-}
-async function runUpdate() {
-  console.log("viot-tasktisk \u2014 update\n");
-  const prefix = resolvePrefix();
-  const npmArgs = ["install", "-g"];
-  if (prefix) {
-    npmArgs.push("--prefix", prefix);
-    console.log(`Install mode : user-local (${prefix})`);
-  } else {
-    console.log("Install mode : global");
-  }
-  npmArgs.push(REPO);
-  console.log(`Running      : npm ${npmArgs.join(" ")}
-`);
-  try {
-    execFileSync("npm", npmArgs, { stdio: "inherit" });
-  } catch {
-    console.error("\nUpdate failed. Try running the command above manually.");
-    process.exit(1);
-  }
-  console.log("\n\u2713 Updated successfully.");
-  console.log("  Restart Claude Desktop to load the new version.");
-}
-var REPO;
-var init_update = __esm({
-  "src/update.ts"() {
-    "use strict";
-    init_config();
-    REPO = "github:Iot-Viet-Solution/viot-tasktisk";
   }
 });
 
@@ -234,6 +280,7 @@ function getMe() {
 }
 
 // src/skills.ts
+init_update();
 function currentWeek() {
   const d = /* @__PURE__ */ new Date();
   d.setHours(0, 0, 0, 0);
@@ -276,8 +323,13 @@ async function dashboard(apiFn, me) {
   const dueWeek = active.filter((t) => t.due && t.due > tod && t.due <= wend);
   const later = active.filter((t) => !t.due || t.due > wend);
   const finished = tasks.filter((t) => doneStatuses.has(t.status ?? ""));
-  const lines = [`# Dashboard \u2014 ${me?.name ?? "Me"} \xB7 ${tod} (${prio.week})
-`];
+  const newVersion = getUpdateAvailable();
+  const lines = [
+    `# Dashboard \u2014 ${me?.name ?? "Me"} \xB7 ${tod} (${prio.week})`,
+    ...newVersion ? [`
+> \u2B06\uFE0F  Update available: ${getLocalVersion()} \u2192 **${newVersion}** \u2014 run \`viot-tasktisk update\` then restart Claude Desktop.`] : [],
+    ""
+  ];
   if (overdue.length) {
     lines.push(`## \u{1F534} Overdue (${overdue.length})`);
     overdue.forEach((t) => lines.push("- " + fmtTask(t)));
@@ -365,6 +417,7 @@ async function getItem(apiFn, { id }) {
 
 // src/index.ts
 init_config();
+init_update();
 var subcommand = process.argv[2];
 if (subcommand === "setup") {
   const { runSetup: runSetup2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));
@@ -388,6 +441,7 @@ try {
   const me = await login(cfg.url, cfg.username, cfg.password);
   process.stderr.write(`viot-tasktisk: logged in as ${me.name} (${me.role})
 `);
+  startUpdateCheck();
 } catch (e) {
   process.stderr.write(`Login failed: ${e.message}
 `);

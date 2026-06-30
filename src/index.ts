@@ -8,6 +8,7 @@ import {
 import { login, api, getMe } from './api.js';
 import { dashboard, updateWork, addTask, getItem } from './skills.js';
 import { loadConfig } from './config.js';
+import { startUpdateCheck } from './update.js';
 import type { UpdateWorkArgs, AddTaskArgs } from './skills.js';
 
 const subcommand = process.argv[2];
@@ -35,6 +36,7 @@ try {
 try {
   const me = await login(cfg.url, cfg.username, cfg.password);
   process.stderr.write(`viot-tasktisk: logged in as ${me.name} (${me.role})\n`);
+  startUpdateCheck(); // fire-and-forget; notifies via stderr + dashboard banner
 } catch (e) {
   process.stderr.write(`Login failed: ${(e as Error).message}\n`);
   process.exit(1);

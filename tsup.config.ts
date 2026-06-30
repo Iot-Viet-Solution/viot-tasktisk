@@ -1,4 +1,7 @@
 import { defineConfig } from 'tsup';
+import { readFileSync } from 'node:fs';
+
+const { version } = JSON.parse(readFileSync('./package.json', 'utf-8')) as { version: string };
 
 export default defineConfig({
   entry: { index: 'src/index.ts' },
@@ -9,6 +12,9 @@ export default defineConfig({
   sourcemap: false,
   clean: true,
   banner: { js: '#!/usr/bin/env node' },
-  // node_modules are external — npm handles them at install time
   noExternal: [],
+  define: {
+    // Injected at build time so the binary knows its own version without reading package.json at runtime
+    __PKG_VERSION__: JSON.stringify(version),
+  },
 });
