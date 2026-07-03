@@ -111,8 +111,15 @@ echo ""
 printf "$(green '✓') Installed. Running setup...\n\n"
 
 # Pass the install prefix so setup can save it for future `viot-tasktisk update` calls.
+# Redirect stdin from the real terminal — this script's own stdin may be an
+# exhausted `curl | bash` pipe, which would otherwise starve setup's prompts.
+SETUP_STDIN=/dev/stdin
+if [ -r /dev/tty ]; then
+  SETUP_STDIN=/dev/tty
+fi
+
 if [ "$choice" = "2" ]; then
-  VIOT_INSTALL_PREFIX="$USER_PREFIX" viot-tasktisk setup
+  VIOT_INSTALL_PREFIX="$USER_PREFIX" viot-tasktisk setup < "$SETUP_STDIN"
 else
-  viot-tasktisk setup
+  viot-tasktisk setup < "$SETUP_STDIN"
 fi
