@@ -93,6 +93,57 @@ Restart Claude Desktop / reload Claude Code after configuring.
 
 ---
 
+## Usage
+
+### From Claude
+
+Once configured (see above), just ask in plain language — Claude picks the right tool:
+
+- *"What's on my dashboard today?"*
+- *"Mark task 482 as Done"*
+- *"Show me item 120 with all its tasks"*
+- *"Add a task to item 120: write API tests, due 2026-07-10, priority Cao"*
+
+### Direct CLI (no Claude needed)
+
+Every tool is also a standalone terminal command — handy for scripts or a quick check:
+
+```bash
+viot-tasktisk dashboard                       # your tasks + weekly priorities
+viot-tasktisk my-tasks                        # alias for dashboard
+viot-tasktisk get-item <item_id>               # full item detail + child tasks
+viot-tasktisk add-task <item_id> <title> [options]
+  --due YYYY-MM-DD          # due date
+  --priority TB|Cao|Thấp    # priority
+  --assignee <user_id>      # assign to user
+  --descr <text>            # description
+viot-tasktisk update-task <task_id> <status>   # Plan · Todo · Doing · Done · Close · "Need help"
+viot-tasktisk update-item <item_id> <status>   # Todo · Doing · Review · Done · Cancelled
+viot-tasktisk --help                           # full command reference
+```
+
+Examples:
+
+```bash
+viot-tasktisk get-item 120
+viot-tasktisk add-task 120 "Write API tests" --due 2026-07-10 --priority Cao
+viot-tasktisk update-task 482 Done
+```
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `command not found: viot-tasktisk` | User-local install only: open a new terminal, or run `source ~/.bashrc` (or `~/.zshrc`) so the PATH change takes effect. |
+| `No config found. Run \`viot-tasktisk setup\`...` | Credentials haven't been saved yet — run `viot-tasktisk setup`, or set `QLDA_URL` / `QLDA_USERNAME` / `QLDA_PASSWORD` env vars. |
+| `Login failed: ...` | Wrong username/password, or the QLDA API URL is unreachable — re-run `viot-tasktisk setup` to fix either. Check the URL is reachable with `curl -I <url>`. |
+| Tools don't show up in Claude Desktop / Claude Code | Config was written but the client hasn't reloaded — fully restart Claude Desktop, or reload the Claude Code window/session. |
+| Claude Desktop specifically can't find the command | User-local installs need the full binary path, not just `viot-tasktisk` on PATH — re-run `viot-tasktisk configure` so it writes the absolute path automatically. |
+
+---
+
 ## Override via env vars
 
 Env vars take priority over the config file — useful for CI or Docker:
