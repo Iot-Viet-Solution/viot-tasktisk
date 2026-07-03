@@ -1,11 +1,13 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { homedir, platform } from 'node:os';
 import { join, dirname } from 'node:path';
 
 export type ConfigFormat =
-  | 'mcp-servers'   // { mcpServers: { name: { command } } }  — Claude Desktop, Claude Code, Antigravity
+  | 'mcp-servers'   // { mcpServers: { name: { command } } }  — Claude Desktop, Antigravity
   | 'vscode'        // { mcp: { servers: { name: { type, command } } } }
-  | 'toml';         // [mcp_servers.<name>]\ncommand = "..."
+  | 'toml'          // [mcp_servers.<name>]\ncommand = "..."
+  | 'claude-cli';   // managed via `claude mcp add/remove`, not a direct file edit — Claude Code
 
 export interface ClaudeTarget {
   name: string;
@@ -29,7 +31,10 @@ export function claudeDesktopTarget(): ClaudeTarget {
 }
 
 export function claudeCodeTarget(): ClaudeTarget {
-  return { name: 'Claude Code', configPath: join(homedir(), '.claude', 'settings.json'), format: 'mcp-servers' };
+  // Claude Code CLI does NOT read mcpServers from ~/.claude/settings.json — it's
+  // managed exclusively through `claude mcp add/remove`, which stores user-scope
+  // servers in ~/.claude.json. configPath here is informational only.
+  return { name: 'Claude Code', configPath: join(homedir(), '.claude.json'), format: 'claude-cli' };
 }
 
 export function vscodeTarget(): ClaudeTarget {
@@ -125,6 +130,15 @@ export function injectMcpServer(target: ClaudeTarget, command: string): void {
     return;
   }
 
+  if (target.format === 'claude-cli') {
+    // Idempotent: drop any existing entry first so re-running configure updates
+    // the command instead of erroring on a duplicate name.
+    try { execFileSync('claude', ['mcp', 'remove', '-s', 'user', 'viot-tasks'], { stdio: 'ignore' }); }
+    catch { /* wasn't configured yet */ }
+    execFileSync('claude', ['mcp', 'add', '-s', 'user', 'viot-tasks', '--', command]);
+    return;
+  }
+
   const cfg = readJson(target.configPath);
 
   if (target.format === 'vscode') {
@@ -146,6 +160,10 @@ export function isAlreadyConfigured(target: ClaudeTarget): boolean {
     if (target.format === 'toml') {
       return tomlHasSection(readToml(target.configPath), 'viot-tasks');
     }
+    if (target.format === 'claude-cli') {
+      const servers = (readJson(target.configPath).mcpServers ?? {}) as Record<string, unknown>;
+      return !!servers['viot-tasks'];
+    }
     const cfg = readJson(target.configPath);
     if (target.format === 'vscode') {
       const servers = ((cfg.mcp as Record<string, unknown>)?.servers ?? {}) as Record<string, unknown>;
@@ -156,11 +174,13 @@ export function isAlreadyConfigured(target: ClaudeTarget): boolean {
 }
 
 /**
- * Claude Desktop doesn't inherit a full shell PATH, so user-local installs
- * need the absolute binary path. Every other tool runs in the terminal where
- * PATH is already set, so the short name is fine.
+ * Every target here spawns the MCP server as its own subprocess rather than
+ * through your interactive shell, so none of them see a PATH change that
+ * only lives in ~/.bashrc or ~/.zshrc (the standard user-local install setup).
+ * Global installs land in a directory that's already on the default PATH for
+ * every shell type, so the short name is fine there.
  */
-export function resolveCommand(installPrefix: string | undefined, target: ClaudeTarget): string {
-  if (!installPrefix || target.name !== 'Claude Desktop') return 'viot-tasktisk';
+export function resolveCommand(installPrefix: string | undefined): string {
+  if (!installPrefix) return 'viot-tasktisk';
   return join(installPrefix, 'bin', 'viot-tasktisk');
 }

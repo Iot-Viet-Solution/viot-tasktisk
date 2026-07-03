@@ -61,7 +61,7 @@ export async function runConfigure(installPrefix?: string): Promise<void> {
     const ans = await rl.question(`  ${target.name}${hint} [Y/n]: `);
     if (/^n/i.test(ans.trim())) continue;
 
-    const command = resolveCommand(installPrefix, target);
+    const command = resolveCommand(installPrefix);
     injectMcpServer(target, command);
     console.log(`  ✓ ${target.name} → ${target.configPath}`);
     if (command !== 'viot-tasktisk') {

@@ -342,6 +342,7 @@ var init_skills = __esm({
 
 // src/claude-config.ts
 import { readFileSync as readFileSync3, writeFileSync, mkdirSync, existsSync } from "fs";
+import { execFileSync as execFileSync2 } from "child_process";
 import { homedir as homedir3, platform } from "os";
 import { join as join3, dirname } from "path";
 function claudeDesktopTarget() {
@@ -357,7 +358,7 @@ function claudeDesktopTarget() {
   return { name: "Claude Desktop", configPath, format: "mcp-servers" };
 }
 function claudeCodeTarget() {
-  return { name: "Claude Code", configPath: join3(homedir3(), ".claude", "settings.json"), format: "mcp-servers" };
+  return { name: "Claude Code", configPath: join3(homedir3(), ".claude.json"), format: "claude-cli" };
 }
 function vscodeTarget() {
   const p = platform();
@@ -440,6 +441,14 @@ function injectMcpServer(target, command) {
     injectToml(target.configPath, "viot-tasks", command);
     return;
   }
+  if (target.format === "claude-cli") {
+    try {
+      execFileSync2("claude", ["mcp", "remove", "-s", "user", "viot-tasks"], { stdio: "ignore" });
+    } catch {
+    }
+    execFileSync2("claude", ["mcp", "add", "-s", "user", "viot-tasks", "--", command]);
+    return;
+  }
   const cfg2 = readJson(target.configPath);
   if (target.format === "vscode") {
     const mcp = cfg2.mcp ?? {};
@@ -457,6 +466,10 @@ function isAlreadyConfigured(target) {
     if (target.format === "toml") {
       return tomlHasSection(readToml(target.configPath), "viot-tasks");
     }
+    if (target.format === "claude-cli") {
+      const servers = readJson(target.configPath).mcpServers ?? {};
+      return !!servers["viot-tasks"];
+    }
     const cfg2 = readJson(target.configPath);
     if (target.format === "vscode") {
       const servers = cfg2.mcp?.servers ?? {};
@@ -467,8 +480,8 @@ function isAlreadyConfigured(target) {
     return false;
   }
 }
-function resolveCommand(installPrefix, target) {
-  if (!installPrefix || target.name !== "Claude Desktop") return "viot-tasktisk";
+function resolveCommand(installPrefix) {
+  if (!installPrefix) return "viot-tasktisk";
   return join3(installPrefix, "bin", "viot-tasktisk");
 }
 var init_claude_config = __esm({
@@ -527,7 +540,7 @@ async function runConfigure(installPrefix) {
     const hint = already ? " (already configured \u2014 overwrite?)" : "";
     const ans = await rl.question(`  ${target.name}${hint} [Y/n]: `);
     if (/^n/i.test(ans.trim())) continue;
-    const command = resolveCommand(installPrefix, target);
+    const command = resolveCommand(installPrefix);
     injectMcpServer(target, command);
     console.log(`  \u2713 ${target.name} \u2192 ${target.configPath}`);
     if (command !== "viot-tasktisk") {
