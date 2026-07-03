@@ -23,12 +23,16 @@ require_npm() {
   fi
 }
 
-detect_profile() {
+detect_profiles() {
   if [ -n "${ZDOTDIR:-}" ] || [ -f "$HOME/.zshrc" ]; then
+    # .zshrc covers interactive shells, .zprofile covers login shells (e.g. SSH)
     echo "$HOME/.zshrc"
-  elif [ -f "$HOME/.bashrc" ]; then
-    echo "$HOME/.bashrc"
+    echo "$HOME/.zprofile"
   else
+    # .bashrc covers interactive non-login shells (local terminals); .profile
+    # covers login shells (SSH sessions), which many distros do NOT source
+    # .bashrc from — without it, a fresh SSH login won't see the PATH change.
+    echo "$HOME/.bashrc"
     echo "$HOME/.profile"
   fi
 }
@@ -79,7 +83,6 @@ case "$choice" in
     BIN_DIR="$USER_PREFIX/bin"
 
     if ! in_path "$BIN_DIR"; then
-      PROFILE=$(detect_profile)
       EXPORT_LINE="export PATH=\"$BIN_DIR:\$PATH\""
 
       echo ""
@@ -90,17 +93,21 @@ case "$choice" in
       echo ""
 
       if [ -r /dev/tty ]; then
-        read -rp "Add it to $PROFILE automatically? [Y/n]: " auto < /dev/tty
+        read -rp "Add it automatically to your shell profile(s)? [Y/n]: " auto < /dev/tty
       else
         auto="Y"
       fi
       if [[ "${auto:-Y}" =~ ^[Yy]$ ]]; then
-        echo "" >> "$PROFILE"
-        echo "# viot-tasktisk" >> "$PROFILE"
-        echo "$EXPORT_LINE" >> "$PROFILE"
-        printf "$(green '✓') Added to %s\n" "$PROFILE"
-        echo "  Run: source $PROFILE"
-        # Also export for the current shell session
+        while IFS= read -r PROFILE; do
+          touch "$PROFILE"
+          if ! grep -qF "$EXPORT_LINE" "$PROFILE" 2>/dev/null; then
+            echo "" >> "$PROFILE"
+            echo "# viot-tasktisk" >> "$PROFILE"
+            echo "$EXPORT_LINE" >> "$PROFILE"
+            printf "$(green '✓') Added to %s\n" "$PROFILE"
+          fi
+        done <<< "$(detect_profiles)"
+        echo "  Open a new terminal (or new SSH session) to pick it up."
         export PATH="$BIN_DIR:$PATH"
       else
         echo "Skipped — add it manually then restart your terminal."
