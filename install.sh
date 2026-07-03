@@ -56,6 +56,21 @@ fi
 
 echo ""
 
+# Collect QLDA credentials upfront too, so the whole thing runs unattended
+# after this point instead of stopping mid-install to ask again.
+QLDA_URL_INPUT=""
+QLDA_USERNAME_INPUT=""
+QLDA_PASSWORD_INPUT=""
+
+if [ -r /dev/tty ]; then
+  printf "$(bold 'QLDA credentials') $(dim '(used to connect to the task server)')\n\n"
+  read -rp "QLDA API URL [http://localhost:3100]: " QLDA_URL_INPUT < /dev/tty
+  read -rp "Username: " QLDA_USERNAME_INPUT < /dev/tty
+  read -rsp "Password: " QLDA_PASSWORD_INPUT < /dev/tty
+  echo ""
+  echo ""
+fi
+
 case "$choice" in
   2)
     echo "Installing to $USER_PREFIX ..."
@@ -116,6 +131,12 @@ printf "$(green '✓') Installed. Running setup...\n\n"
 SETUP_STDIN=/dev/stdin
 if [ -r /dev/tty ]; then
   SETUP_STDIN=/dev/tty
+fi
+
+if [ -n "$QLDA_USERNAME_INPUT" ] && [ -n "$QLDA_PASSWORD_INPUT" ]; then
+  export QLDA_URL="${QLDA_URL_INPUT:-http://localhost:3100}"
+  export QLDA_USERNAME="$QLDA_USERNAME_INPUT"
+  export QLDA_PASSWORD="$QLDA_PASSWORD_INPUT"
 fi
 
 if [ "$choice" = "2" ]; then

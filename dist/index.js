@@ -572,14 +572,27 @@ async function runSetup() {
     } catch {
     }
   }
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const urlDefault = existing.url ?? "http://localhost:3100";
-  const rawUrl = await rl.question(`QLDA API URL [${urlDefault}]: `);
-  const url = rawUrl.trim() || urlDefault;
-  const rawUser = await rl.question(`Username${existing.username ? ` [${existing.username}]` : ""}: `);
-  const username = rawUser.trim() || existing.username || "";
-  rl.close();
-  const password = await readPassword("Password: ");
+  const envUrl = process.env.QLDA_URL?.trim();
+  const envUsername = process.env.QLDA_USERNAME?.trim();
+  const envPassword = process.env.QLDA_PASSWORD;
+  let url;
+  let username;
+  let password;
+  if (envUrl && envUsername && envPassword) {
+    console.log("Using QLDA_URL / QLDA_USERNAME / QLDA_PASSWORD from environment.\n");
+    url = envUrl;
+    username = envUsername;
+    password = envPassword;
+  } else {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const urlDefault = existing.url ?? "http://localhost:3100";
+    const rawUrl = await rl.question(`QLDA API URL [${urlDefault}]: `);
+    url = rawUrl.trim() || urlDefault;
+    const rawUser = await rl.question(`Username${existing.username ? ` [${existing.username}]` : ""}: `);
+    username = rawUser.trim() || existing.username || "";
+    rl.close();
+    password = await readPassword("Password: ");
+  }
   if (!username) {
     console.error("\nUsername is required.");
     process.exit(1);

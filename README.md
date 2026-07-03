@@ -18,14 +18,15 @@ Exposes 4 high-level skills to Claude — no raw API fiddling needed.
 
 ### macOS / Linux
 
-Run the installer — it asks whether to install globally or for the current user only,
-then launches the setup wizard:
+Run the installer. It asks a few questions upfront — global vs. user install, then
+your QLDA credentials — so the rest (npm install + setup wizard) runs unattended:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/install.sh | bash
 ```
 
-The wizard prompts for:
+Upfront prompts:
+- **Global or User install**
 - **QLDA API URL** (default `http://localhost:3100`)
 - **Username**
 - **Password** (hidden input)
