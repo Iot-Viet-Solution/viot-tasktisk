@@ -29,11 +29,20 @@ detect_profiles() {
     echo "$HOME/.zshrc"
     echo "$HOME/.zprofile"
   else
-    # .bashrc covers interactive non-login shells (local terminals); .profile
-    # covers login shells (SSH sessions), which many distros do NOT source
-    # .bashrc from — without it, a fresh SSH login won't see the PATH change.
+    # .bashrc covers interactive non-login shells (local terminals).
     echo "$HOME/.bashrc"
-    echo "$HOME/.profile"
+
+    # For LOGIN shells (e.g. SSH sessions), bash reads only the FIRST
+    # existing file among ~/.bash_profile, ~/.bash_login, ~/.profile — never
+    # all of them. Target whichever one bash will actually read, or create
+    # ~/.profile if none exist yet (bash's own fallback).
+    if [ -f "$HOME/.bash_profile" ]; then
+      echo "$HOME/.bash_profile"
+    elif [ -f "$HOME/.bash_login" ]; then
+      echo "$HOME/.bash_login"
+    else
+      echo "$HOME/.profile"
+    fi
   fi
 }
 
