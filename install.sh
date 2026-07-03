@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
-REPO="https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.0.0.tgz"
+# Keep this filename's version in lockstep with package.json's "version" —
+# `viot-tasktisk update` compares that field against this same release, so a
+# stale filename here silently breaks update-detection for everyone.
+REPO="https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.0.1.tgz"
 USER_PREFIX="$HOME/.npm-global"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
