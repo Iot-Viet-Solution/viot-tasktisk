@@ -46,7 +46,13 @@ printf "$(bold 'viot-tasktisk') — install\n\n"
 echo "  $(bold '[1]') Global   — all users on this machine $(dim '(may need sudo)')"
 echo "  $(bold '[2]') User     — current user only, no sudo needed"
 echo ""
-read -rp "Choose [1/2, default 1]: " choice
+if [ -r /dev/tty ]; then
+  read -rp "Choose [1/2, default 1]: " choice < /dev/tty
+else
+  echo "No interactive terminal detected (e.g. running via 'curl | bash' in a non-TTY context)."
+  echo "Defaulting to User install — no sudo needed."
+  choice=2
+fi
 
 echo ""
 
@@ -68,7 +74,11 @@ case "$choice" in
       printf "  $(green "$EXPORT_LINE")\n"
       echo ""
 
-      read -rp "Add it to $PROFILE automatically? [Y/n]: " auto
+      if [ -r /dev/tty ]; then
+        read -rp "Add it to $PROFILE automatically? [Y/n]: " auto < /dev/tty
+      else
+        auto="Y"
+      fi
       if [[ "${auto:-Y}" =~ ^[Yy]$ ]]; then
         echo "" >> "$PROFILE"
         echo "# viot-tasktisk" >> "$PROFILE"
@@ -85,7 +95,15 @@ case "$choice" in
     ;;
   *)
     echo "Installing globally ..."
-    npm install -g "$REPO"
+    if ! npm install -g "$REPO"; then
+      echo ""
+      echo "Global install failed — likely no write access to npm's global directory (needs sudo)."
+      echo "Re-run this script and choose [2] User install instead, which needs no sudo:"
+      echo ""
+      echo "  curl -fsSL https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/install.sh | bash"
+      echo ""
+      exit 1
+    fi
     ;;
 esac
 
