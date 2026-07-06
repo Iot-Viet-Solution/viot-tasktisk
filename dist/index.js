@@ -731,7 +731,8 @@ __export(cli_exports, {
   runLogTime: () => runLogTime,
   runNotifications: () => runNotifications,
   runUpdateItem: () => runUpdateItem,
-  runUpdateTask: () => runUpdateTask
+  runUpdateTask: () => runUpdateTask,
+  runWhoami: () => runWhoami
 });
 function die(msg, code = 1) {
   process.stderr.write(msg + "\n");
@@ -816,6 +817,21 @@ async function runUpdateItem(rawArgs) {
   await loginFromConfig();
   const text = await updateWork(api, { id, kind: "item", status });
   console.log(text);
+}
+async function runWhoami() {
+  const usingEnv = !!(process.env.QLDA_URL && process.env.QLDA_USERNAME && process.env.QLDA_PASSWORD);
+  let cfg2;
+  try {
+    cfg2 = loadConfig();
+  } catch (e) {
+    die(e.message);
+  }
+  console.log(`Source:   ${usingEnv ? "environment variables (QLDA_URL/QLDA_USERNAME/QLDA_PASSWORD)" : CONFIG_PATH}`);
+  console.log(`URL:      ${cfg2.url}`);
+  console.log(`Username: ${cfg2.username}`);
+  console.log(`Password: ${cfg2.password ? "*".repeat(8) + " (set)" : "(not set)"}`);
+  if (!usingEnv && cfg2.installPrefix) console.log(`Install:  ${cfg2.installPrefix} (user-local)`);
+  console.log("\nNote: this only reads local config \u2014 it does not verify the credentials are valid.");
 }
 async function runListUsers() {
   await loginFromConfig();
@@ -919,6 +935,7 @@ Setup:
   viot-tasktisk setup                 Interactive setup wizard
   viot-tasktisk configure             Re-configure Claude integrations only
   viot-tasktisk update                Update to the latest version
+  viot-tasktisk whoami                Show configured URL/username (no login attempt)
 
 Direct CLI commands (no MCP client needed):
   viot-tasktisk dashboard             Show your personal task dashboard
@@ -1035,6 +1052,10 @@ var commands = {
     const { runUpdate: runUpdate2 } = await Promise.resolve().then(() => (init_update(), update_exports));
     await runUpdate2();
   },
+  whoami: async () => {
+    const { runWhoami: runWhoami2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runWhoami2();
+  },
   dashboard: async () => {
     const { runDashboard: runDashboard2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
     await runDashboard2();
@@ -1103,13 +1124,15 @@ try {
 `);
   process.exit(1);
 }
+process.stderr.write(`viot-tasktisk: url=${cfg.url} user=${cfg.username} \u2014 logging in...
+`);
 try {
   const me = await login(cfg.url, cfg.username, cfg.password);
   process.stderr.write(`viot-tasktisk: logged in as ${me.name} (${me.role})
 `);
   startUpdateCheck();
 } catch (e) {
-  process.stderr.write(`Login failed: ${formatError(e)}
+  process.stderr.write(`viot-tasktisk: login failed \u2014 ${formatError(e)}
 `);
   process.exit(1);
 }

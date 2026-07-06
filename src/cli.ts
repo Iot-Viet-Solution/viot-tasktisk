@@ -6,7 +6,7 @@
 import { login, api } from './api.js';
 import { dashboard, updateWork, addTask, getItem, listUsers, notifications, logTime, comment } from './skills.js';
 import type { CommentArgs } from './skills.js';
-import { loadConfig } from './config.js';
+import { loadConfig, CONFIG_PATH } from './config.js';
 
 function die(msg: string, code = 1): never {
   process.stderr.write(msg + '\n');
@@ -101,6 +101,22 @@ export async function runUpdateItem(rawArgs: string[]): Promise<void> {
   await loginFromConfig();
   const text = await updateWork(api, { id, kind: 'item', status });
   console.log(text);
+}
+
+export async function runWhoami(): Promise<void> {
+  const usingEnv = !!(process.env.QLDA_URL && process.env.QLDA_USERNAME && process.env.QLDA_PASSWORD);
+  let cfg;
+  try {
+    cfg = loadConfig();
+  } catch (e) {
+    die((e as Error).message);
+  }
+  console.log(`Source:   ${usingEnv ? 'environment variables (QLDA_URL/QLDA_USERNAME/QLDA_PASSWORD)' : CONFIG_PATH}`);
+  console.log(`URL:      ${cfg.url}`);
+  console.log(`Username: ${cfg.username}`);
+  console.log(`Password: ${cfg.password ? '*'.repeat(8) + ' (set)' : '(not set)'}`);
+  if (!usingEnv && cfg.installPrefix) console.log(`Install:  ${cfg.installPrefix} (user-local)`);
+  console.log('\nNote: this only reads local config — it does not verify the credentials are valid.');
 }
 
 export async function runListUsers(): Promise<void> {
@@ -212,6 +228,7 @@ Setup:
   viot-tasktisk setup                 Interactive setup wizard
   viot-tasktisk configure             Re-configure Claude integrations only
   viot-tasktisk update                Update to the latest version
+  viot-tasktisk whoami                Show configured URL/username (no login attempt)
 
 Direct CLI commands (no MCP client needed):
   viot-tasktisk dashboard             Show your personal task dashboard

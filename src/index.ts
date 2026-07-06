@@ -49,6 +49,10 @@ const commands: Record<string, CommandFn> = {
     const { runUpdate } = await import('./update.js');
     await runUpdate();
   },
+  whoami: async () => {
+    const { runWhoami } = await import('./cli.js');
+    await runWhoami();
+  },
   dashboard: async () => {
     const { runDashboard } = await import('./cli.js');
     await runDashboard();
@@ -114,12 +118,14 @@ try {
   process.exit(1);
 }
 
+process.stderr.write(`viot-tasktisk: url=${cfg.url} user=${cfg.username} — logging in...\n`);
+
 try {
   const me = await login(cfg.url, cfg.username, cfg.password);
   process.stderr.write(`viot-tasktisk: logged in as ${me.name} (${me.role})\n`);
   startUpdateCheck(); // fire-and-forget; notifies via stderr + dashboard banner
 } catch (e) {
-  process.stderr.write(`Login failed: ${formatError(e)}\n`);
+  process.stderr.write(`viot-tasktisk: login failed — ${formatError(e)}\n`);
   process.exit(1);
 }
 
