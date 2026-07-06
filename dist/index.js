@@ -333,6 +333,107 @@ async function getItem(apiFn, { id }) {
   }
   return lines.join("\n");
 }
+async function listUsers(apiFn) {
+  const users = await apiFn("GET", "/users");
+  if (!users.length) return "_No users found._";
+  return ["# Users", ...users.map((u) => `- [user:${u.id}] ${u.name} (${u.role})`)].join("\n");
+}
+async function notifications(apiFn, args = {}) {
+  const { unread_only, limit, mark_read, mark_all_read } = args;
+  if (mark_all_read) {
+    await apiFn("PATCH", "/me/notifications/read-all");
+    return "Marked all notifications as read.";
+  }
+  if (mark_read != null) {
+    await apiFn("PATCH", `/notifications/${mark_read}/read`);
+    return `Marked notification #${mark_read} as read.`;
+  }
+  const qs = new URLSearchParams();
+  if (limit != null) qs.set("limit", String(limit));
+  if (unread_only) qs.set("unread", "1");
+  const query = qs.toString();
+  const [list, unreadList] = await Promise.all([
+    apiFn("GET", `/me/notifications${query ? `?${query}` : ""}`),
+    apiFn("GET", "/me/notifications?unread=1&limit=500")
+  ]);
+  const lines = [`# Notifications (${unreadList.length} unread)`];
+  if (!list.length) {
+    lines.push("_No notifications._");
+  } else {
+    list.forEach((n) => {
+      const ref = n.ref_type && n.ref_id ? ` [${n.ref_type}:${n.ref_id}]` : "";
+      const mark = n.read_at ? "" : " \u{1F535}";
+      lines.push(`- [notif:${n.id}]${mark} ${n.body}${ref} \xB7 ${n.created}`);
+    });
+  }
+  return lines.join("\n");
+}
+function fmtHours(minutes) {
+  return (minutes / 60).toFixed(1).replace(/\.0$/, "");
+}
+function fmtLog(l, bullet = true) {
+  const note = l.note ? ` \u2014 ${l.note}` : "";
+  const prefix = bullet ? "- " : "";
+  return `${prefix}[log:${l.id}] task:${l.task_id} ${l.date} \xB7 ${fmtHours(l.minutes)}h${note}`;
+}
+async function logTime(apiFn, args) {
+  const { action, task_id, id, minutes, date, from, to, note } = args;
+  if (action === "log") {
+    if (task_id == null || minutes == null) throw new Error("task_id and minutes are required to log time");
+    const log = await apiFn("POST", "/me/task-logs", { task_id, minutes, date, note });
+    return `Logged ${fmtHours(log.minutes)}h on task #${log.task_id} (${log.date})`;
+  }
+  if (action === "update") {
+    if (id == null) throw new Error("id is required to update a time log");
+    const log = await apiFn("PATCH", `/task-logs/${id}`, { minutes, date, note });
+    return `Updated ${fmtLog(log, false)}`;
+  }
+  if (action === "delete") {
+    if (id == null) throw new Error("id is required to delete a time log");
+    await apiFn("DELETE", `/task-logs/${id}`);
+    return `Deleted log #${id}`;
+  }
+  const qs = new URLSearchParams();
+  if (from && to) {
+    qs.set("from", from);
+    qs.set("to", to);
+  } else if (date) qs.set("date", date);
+  const query = qs.toString();
+  const logs = await apiFn("GET", `/me/task-logs${query ? `?${query}` : ""}`);
+  if (!logs.length) return "_No time logs found._";
+  const totalMinutes = logs.reduce((s, l) => s + l.minutes, 0);
+  return [`# Time Logs (${fmtHours(totalMinutes)}h total)`, ...logs.map((l) => fmtLog(l))].join("\n");
+}
+async function comment(apiFn, args) {
+  const { action, entity_type, entity_id, id, text } = args;
+  if (action === "add") {
+    if (!entity_type || entity_id == null || !text) {
+      throw new Error("entity_type, entity_id, and text are required to add a comment");
+    }
+    const att = await apiFn("POST", `/attachments/${entity_type}/${entity_id}`, { kind: "comment", text });
+    return `Added comment #${att.id} to ${entity_type}:${entity_id}`;
+  }
+  if (action === "update") {
+    if (id == null || !text) throw new Error("id and text are required to update a comment");
+    const att = await apiFn("PATCH", `/attachments/${id}`, { text });
+    return `Updated comment #${att.id}`;
+  }
+  if (action === "delete") {
+    if (id == null) throw new Error("id is required to delete a comment");
+    await apiFn("DELETE", `/attachments/${id}`);
+    return `Deleted comment #${id}`;
+  }
+  if (!entity_type || entity_id == null) {
+    throw new Error("entity_type and entity_id are required to list comments");
+  }
+  const items = await apiFn("GET", `/attachments/${entity_type}/${entity_id}`);
+  const cmts = items.filter((a) => a.kind === "comment");
+  if (!cmts.length) return `_No comments on ${entity_type}:${entity_id}._`;
+  return [
+    `# Comments on ${entity_type}:${entity_id} (${cmts.length})`,
+    ...cmts.map((c) => `- [comment:${c.id}] user:${c.user_id ?? "?"} (${c.created ?? "\u2014"}): ${c.text}`)
+  ].join("\n");
+}
 var init_skills = __esm({
   "src/skills.ts"() {
     "use strict";
@@ -623,8 +724,12 @@ var cli_exports = {};
 __export(cli_exports, {
   printHelp: () => printHelp,
   runAddTask: () => runAddTask,
+  runComment: () => runComment,
   runDashboard: () => runDashboard,
   runGetItem: () => runGetItem,
+  runListUsers: () => runListUsers,
+  runLogTime: () => runLogTime,
+  runNotifications: () => runNotifications,
   runUpdateItem: () => runUpdateItem,
   runUpdateTask: () => runUpdateTask
 });
@@ -712,6 +817,98 @@ async function runUpdateItem(rawArgs) {
   const text = await updateWork(api, { id, kind: "item", status });
   console.log(text);
 }
+async function runListUsers() {
+  await loginFromConfig();
+  const text = await listUsers(api);
+  console.log(text);
+}
+async function runNotifications(rawArgs) {
+  const { positional, flags } = parseFlags(rawArgs);
+  await loginFromConfig();
+  let text;
+  if (positional[0] === "read") {
+    const id = Number(positional[1]);
+    if (!id) die("Usage: viot-tasktisk notifications read <notification_id>");
+    text = await notifications(api, { mark_read: id });
+  } else if (positional[0] === "read-all") {
+    text = await notifications(api, { mark_all_read: true });
+  } else {
+    text = await notifications(api, {
+      unread_only: flags["unread"] === "true",
+      limit: flags["limit"] ? Number(flags["limit"]) : void 0
+    });
+  }
+  console.log(text);
+}
+async function runLogTime(rawArgs) {
+  const { positional, flags } = parseFlags(rawArgs);
+  await loginFromConfig();
+  let text;
+  if (positional[0] === "list") {
+    text = await logTime(api, { action: "list", date: flags["date"], from: flags["from"], to: flags["to"] });
+  } else if (positional[0] === "update") {
+    const id = Number(positional[1]);
+    if (!id) die("Usage: viot-tasktisk log-time update <log_id> [--minutes N] [--date YYYY-MM-DD] [--note text]");
+    text = await logTime(api, {
+      action: "update",
+      id,
+      minutes: flags["minutes"] ? Number(flags["minutes"]) : void 0,
+      date: flags["date"],
+      note: flags["note"]
+    });
+  } else if (positional[0] === "delete") {
+    const id = Number(positional[1]);
+    if (!id) die("Usage: viot-tasktisk log-time delete <log_id>");
+    text = await logTime(api, { action: "delete", id });
+  } else {
+    const taskId = Number(positional[0]);
+    const minutes = Number(positional[1]);
+    if (!taskId || !minutes) {
+      die("Usage: viot-tasktisk log-time <task_id> <minutes> [--date YYYY-MM-DD] [--note text]\n       viot-tasktisk log-time list [--date YYYY-MM-DD] [--from ..] [--to ..]\n       viot-tasktisk log-time update <log_id> [--minutes N] [--date ..] [--note ..]\n       viot-tasktisk log-time delete <log_id>");
+    }
+    text = await logTime(api, { action: "log", task_id: taskId, minutes, date: flags["date"], note: flags["note"] });
+  }
+  console.log(text);
+}
+async function runComment(rawArgs) {
+  const { positional } = parseFlags(rawArgs);
+  const [sub, ...rest] = positional;
+  await loginFromConfig();
+  let text;
+  switch (sub) {
+    case "list": {
+      const entityType = rest[0];
+      const entityId = Number(rest[1]);
+      if (!entityType || !entityId) die("Usage: viot-tasktisk comment list <task|item|feature> <id>");
+      text = await comment(api, { action: "list", entity_type: entityType, entity_id: entityId });
+      break;
+    }
+    case "add": {
+      const entityType = rest[0];
+      const entityId = Number(rest[1]);
+      const body = rest.slice(2).join(" ");
+      if (!entityType || !entityId || !body) die("Usage: viot-tasktisk comment add <task|item|feature> <id> <text>");
+      text = await comment(api, { action: "add", entity_type: entityType, entity_id: entityId, text: body });
+      break;
+    }
+    case "update": {
+      const id = Number(rest[0]);
+      const body = rest.slice(1).join(" ");
+      if (!id || !body) die("Usage: viot-tasktisk comment update <comment_id> <text>");
+      text = await comment(api, { action: "update", id, text: body });
+      break;
+    }
+    case "delete": {
+      const id = Number(rest[0]);
+      if (!id) die("Usage: viot-tasktisk comment delete <comment_id>");
+      text = await comment(api, { action: "delete", id });
+      break;
+    }
+    default:
+      die("Usage: viot-tasktisk comment <list|add|update|delete> ...");
+  }
+  console.log(text);
+}
 function printHelp() {
   console.log(`viot-tasktisk \u2014 qlda-viot task tracking
 
@@ -739,6 +936,29 @@ Direct CLI commands (no MCP client needed):
   viot-tasktisk update-item <id> <status>
                                       Update item status
                                       (Todo/Doing/Review/Done/Cancelled)
+  viot-tasktisk list-users            List all users (id, name, role)
+  viot-tasktisk notifications [--unread] [--limit N]
+                                      Show your notifications + unread count
+  viot-tasktisk notifications read <id>
+                                      Mark one notification as read
+  viot-tasktisk notifications read-all
+                                      Mark all notifications as read
+  viot-tasktisk log-time <task_id> <minutes> [--date YYYY-MM-DD] [--note text]
+                                      Log time spent on a task
+  viot-tasktisk log-time list [--date YYYY-MM-DD] [--from .. --to ..]
+                                      List your time logs
+  viot-tasktisk log-time update <log_id> [--minutes N] [--date ..] [--note ..]
+                                      Edit a time log entry
+  viot-tasktisk log-time delete <log_id>
+                                      Delete a time log entry
+  viot-tasktisk comment list <task|item|feature> <id>
+                                      List comments on an entity
+  viot-tasktisk comment add <task|item|feature> <id> <text>
+                                      Add a comment (use @Name to mention)
+  viot-tasktisk comment update <comment_id> <text>
+                                      Edit your own comment
+  viot-tasktisk comment delete <comment_id>
+                                      Delete your own comment
 
 Environment variables override config file:
   QLDA_URL, QLDA_USERNAME, QLDA_PASSWORD
@@ -809,6 +1029,26 @@ if (subcommand === "update-task") {
 if (subcommand === "update-item") {
   const { runUpdateItem: runUpdateItem2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
   await runUpdateItem2(subArgs);
+  process.exit(0);
+}
+if (subcommand === "list-users") {
+  const { runListUsers: runListUsers2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+  await runListUsers2();
+  process.exit(0);
+}
+if (subcommand === "notifications") {
+  const { runNotifications: runNotifications2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+  await runNotifications2(subArgs);
+  process.exit(0);
+}
+if (subcommand === "log-time") {
+  const { runLogTime: runLogTime2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+  await runLogTime2(subArgs);
+  process.exit(0);
+}
+if (subcommand === "comment") {
+  const { runComment: runComment2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+  await runComment2(subArgs);
   process.exit(0);
 }
 if (subcommand === "--help" || subcommand === "-h" || subcommand === "help") {
@@ -886,6 +1126,57 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
         required: ["item_id", "title"]
       }
+    },
+    {
+      name: "list_users",
+      description: "List all users (id, name, role) \u2014 use to resolve a name to a user id for assignment.",
+      inputSchema: { type: "object", properties: {} }
+    },
+    {
+      name: "notifications",
+      description: "List your notifications (assignments, mentions, comments, completions) with unread count, or mark one/all as read.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          unread_only: { type: "boolean", description: "Only show unread notifications (optional)" },
+          limit: { type: "number", description: "Max notifications to return (optional, default 50)" },
+          mark_read: { type: "number", description: "Notification ID to mark as read (optional)" },
+          mark_all_read: { type: "boolean", description: "Mark all your notifications as read (optional)" }
+        }
+      }
+    },
+    {
+      name: "log_time",
+      description: 'Log, list, update, or delete time spent on tasks (your personal timesheet). "log" records new time; "list" shows your logs by date or range; "update"/"delete" modify an existing log entry.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["log", "list", "update", "delete"], description: "Operation to perform" },
+          task_id: { type: "number", description: 'Task ID (required for action="log")' },
+          id: { type: "number", description: 'Time log ID (required for action="update"/"delete")' },
+          minutes: { type: "number", description: 'Minutes worked (required for "log", optional for "update")' },
+          date: { type: "string", description: "Date YYYY-MM-DD (optional, defaults to today)" },
+          from: { type: "string", description: 'Range start YYYY-MM-DD (for action="list")' },
+          to: { type: "string", description: 'Range end YYYY-MM-DD (for action="list")' },
+          note: { type: "string", description: "Optional note" }
+        },
+        required: ["action"]
+      }
+    },
+    {
+      name: "comment",
+      description: "List, add, update, or delete comments on a task, item, or feature. Adding a comment on a task notifies its assignee; use @Name in the text to also notify a mentioned user.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["list", "add", "update", "delete"], description: "Operation to perform" },
+          entity_type: { type: "string", enum: ["task", "item", "feature"], description: 'Entity type (required for "list"/"add")' },
+          entity_id: { type: "number", description: 'Entity ID (required for "list"/"add")' },
+          id: { type: "number", description: 'Comment ID (required for "update"/"delete")' },
+          text: { type: "string", description: 'Comment text (required for "add"/"update")' }
+        },
+        required: ["action"]
+      }
     }
   ]
 }));
@@ -905,6 +1196,18 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         break;
       case "add_task":
         text = await addTask(api, args);
+        break;
+      case "list_users":
+        text = await listUsers(api);
+        break;
+      case "notifications":
+        text = await notifications(api, args);
+        break;
+      case "log_time":
+        text = await logTime(api, args);
+        break;
+      case "comment":
+        text = await comment(api, args);
         break;
       default:
         throw new Error(`Unknown tool: ${name}`);

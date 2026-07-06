@@ -5,10 +5,10 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { login, api, getMe } from './api.js';
-import { dashboard, updateWork, addTask, getItem } from './skills.js';
+import { dashboard, updateWork, addTask, getItem, listUsers, notifications, logTime, comment } from './skills.js';
 import { loadConfig } from './config.js';
 import { startUpdateCheck } from './update.js';
-import type { UpdateWorkArgs, AddTaskArgs } from './skills.js';
+import type { UpdateWorkArgs, AddTaskArgs, NotificationsArgs, LogTimeArgs, CommentArgs } from './skills.js';
 
 const subcommand = process.argv[2];
 const subArgs = process.argv.slice(3);
@@ -64,6 +64,30 @@ if (subcommand === 'update-task') {
 if (subcommand === 'update-item') {
   const { runUpdateItem } = await import('./cli.js');
   await runUpdateItem(subArgs);
+  process.exit(0);
+}
+
+if (subcommand === 'list-users') {
+  const { runListUsers } = await import('./cli.js');
+  await runListUsers();
+  process.exit(0);
+}
+
+if (subcommand === 'notifications') {
+  const { runNotifications } = await import('./cli.js');
+  await runNotifications(subArgs);
+  process.exit(0);
+}
+
+if (subcommand === 'log-time') {
+  const { runLogTime } = await import('./cli.js');
+  await runLogTime(subArgs);
+  process.exit(0);
+}
+
+if (subcommand === 'comment') {
+  const { runComment } = await import('./cli.js');
+  await runComment(subArgs);
   process.exit(0);
 }
 
@@ -152,6 +176,64 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['item_id', 'title'],
       },
     },
+    {
+      name: 'list_users',
+      description: 'List all users (id, name, role) — use to resolve a name to a user id for assignment.',
+      inputSchema: { type: 'object' as const, properties: {} },
+    },
+    {
+      name: 'notifications',
+      description:
+        'List your notifications (assignments, mentions, comments, completions) with unread count, ' +
+        'or mark one/all as read.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          unread_only:   { type: 'boolean', description: 'Only show unread notifications (optional)' },
+          limit:         { type: 'number', description: 'Max notifications to return (optional, default 50)' },
+          mark_read:     { type: 'number', description: 'Notification ID to mark as read (optional)' },
+          mark_all_read: { type: 'boolean', description: 'Mark all your notifications as read (optional)' },
+        },
+      },
+    },
+    {
+      name: 'log_time',
+      description:
+        'Log, list, update, or delete time spent on tasks (your personal timesheet). ' +
+        '"log" records new time; "list" shows your logs by date or range; ' +
+        '"update"/"delete" modify an existing log entry.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          action:  { type: 'string', enum: ['log', 'list', 'update', 'delete'], description: 'Operation to perform' },
+          task_id: { type: 'number', description: 'Task ID (required for action="log")' },
+          id:      { type: 'number', description: 'Time log ID (required for action="update"/"delete")' },
+          minutes: { type: 'number', description: 'Minutes worked (required for "log", optional for "update")' },
+          date:    { type: 'string', description: 'Date YYYY-MM-DD (optional, defaults to today)' },
+          from:    { type: 'string', description: 'Range start YYYY-MM-DD (for action="list")' },
+          to:      { type: 'string', description: 'Range end YYYY-MM-DD (for action="list")' },
+          note:    { type: 'string', description: 'Optional note' },
+        },
+        required: ['action'],
+      },
+    },
+    {
+      name: 'comment',
+      description:
+        'List, add, update, or delete comments on a task, item, or feature. ' +
+        'Adding a comment on a task notifies its assignee; use @Name in the text to also notify a mentioned user.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          action:      { type: 'string', enum: ['list', 'add', 'update', 'delete'], description: 'Operation to perform' },
+          entity_type: { type: 'string', enum: ['task', 'item', 'feature'], description: 'Entity type (required for "list"/"add")' },
+          entity_id:   { type: 'number', description: 'Entity ID (required for "list"/"add")' },
+          id:          { type: 'number', description: 'Comment ID (required for "update"/"delete")' },
+          text:        { type: 'string', description: 'Comment text (required for "add"/"update")' },
+        },
+        required: ['action'],
+      },
+    },
   ],
 }));
 
@@ -164,6 +246,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'update_work': text = await updateWork(api, args as unknown as UpdateWorkArgs); break;
       case 'get_item':    text = await getItem(api, args as { id: number }); break;
       case 'add_task':    text = await addTask(api, args as unknown as AddTaskArgs); break;
+      case 'list_users':  text = await listUsers(api); break;
+      case 'notifications': text = await notifications(api, args as unknown as NotificationsArgs); break;
+      case 'log_time':    text = await logTime(api, args as unknown as LogTimeArgs); break;
+      case 'comment':     text = await comment(api, args as unknown as CommentArgs); break;
       default: throw new Error(`Unknown tool: ${name}`);
     }
     return { content: [{ type: 'text' as const, text }] };

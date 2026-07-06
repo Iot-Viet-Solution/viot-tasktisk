@@ -43,6 +43,45 @@ interface ItemWithTasks {
   tasks?: Task[];
 }
 
+interface PublicUser {
+  id: number;
+  name: string;
+  role: string;
+}
+
+interface Notification {
+  id: number;
+  user_id: number;
+  type: string;
+  ref_type: string | null;
+  ref_id: number | null;
+  body: string;
+  read_at: string | null;
+  created: string;
+}
+
+interface TaskLog {
+  id: number;
+  task_id: number;
+  user_id: number;
+  date: string;
+  minutes: number;
+  note: string | null;
+  created: string | null;
+}
+
+interface Attachment {
+  id: number;
+  project_id: number;
+  etype: string;
+  eid: number;
+  kind: string;
+  name: string | null;
+  text: string | null;
+  created: string | null;
+  user_id: number | null;
+}
+
 interface WeeklyPriorityItem {
   id: number;
   rank: number;
@@ -229,4 +268,148 @@ export async function getItem(apiFn: ApiFn, { id }: { id: number }): Promise<str
     lines.push('', '_No tasks yet._');
   }
   return lines.join('\n');
+}
+
+export async function listUsers(apiFn: ApiFn): Promise<string> {
+  const users = await apiFn<PublicUser[]>('GET', '/users');
+  if (!users.length) return '_No users found._';
+  return ['# Users', ...users.map(u => `- [user:${u.id}] ${u.name} (${u.role})`)].join('\n');
+}
+
+export interface NotificationsArgs {
+  unread_only?: boolean;
+  limit?: number;
+  mark_read?: number;
+  mark_all_read?: boolean;
+}
+
+export async function notifications(apiFn: ApiFn, args: NotificationsArgs = {}): Promise<string> {
+  const { unread_only, limit, mark_read, mark_all_read } = args;
+
+  if (mark_all_read) {
+    await apiFn('PATCH', '/me/notifications/read-all');
+    return 'Marked all notifications as read.';
+  }
+  if (mark_read != null) {
+    await apiFn('PATCH', `/notifications/${mark_read}/read`);
+    return `Marked notification #${mark_read} as read.`;
+  }
+
+  const qs = new URLSearchParams();
+  if (limit != null) qs.set('limit', String(limit));
+  if (unread_only) qs.set('unread', '1');
+  const query = qs.toString();
+  // /me/notifications/unread-count is unusable server-side (returns an unawaited
+  // promise, serializes to {}); derive the count from a dedicated unread-only fetch instead.
+  const [list, unreadList] = await Promise.all([
+    apiFn<Notification[]>('GET', `/me/notifications${query ? `?${query}` : ''}`),
+    apiFn<Notification[]>('GET', '/me/notifications?unread=1&limit=500'),
+  ]);
+
+  const lines = [`# Notifications (${unreadList.length} unread)`];
+  if (!list.length) {
+    lines.push('_No notifications._');
+  } else {
+    list.forEach(n => {
+      const ref = n.ref_type && n.ref_id ? ` [${n.ref_type}:${n.ref_id}]` : '';
+      const mark = n.read_at ? '' : ' 🔵';
+      lines.push(`- [notif:${n.id}]${mark} ${n.body}${ref} · ${n.created}`);
+    });
+  }
+  return lines.join('\n');
+}
+
+function fmtHours(minutes: number): string {
+  return (minutes / 60).toFixed(1).replace(/\.0$/, '');
+}
+
+function fmtLog(l: TaskLog, bullet = true): string {
+  const note = l.note ? ` — ${l.note}` : '';
+  const prefix = bullet ? '- ' : '';
+  return `${prefix}[log:${l.id}] task:${l.task_id} ${l.date} · ${fmtHours(l.minutes)}h${note}`;
+}
+
+export interface LogTimeArgs {
+  action: 'log' | 'list' | 'update' | 'delete';
+  task_id?: number;
+  id?: number;
+  minutes?: number;
+  date?: string;
+  from?: string;
+  to?: string;
+  note?: string;
+}
+
+export async function logTime(apiFn: ApiFn, args: LogTimeArgs): Promise<string> {
+  const { action, task_id, id, minutes, date, from, to, note } = args;
+
+  if (action === 'log') {
+    if (task_id == null || minutes == null) throw new Error('task_id and minutes are required to log time');
+    const log = await apiFn<TaskLog>('POST', '/me/task-logs', { task_id, minutes, date, note });
+    return `Logged ${fmtHours(log.minutes)}h on task #${log.task_id} (${log.date})`;
+  }
+
+  if (action === 'update') {
+    if (id == null) throw new Error('id is required to update a time log');
+    const log = await apiFn<TaskLog>('PATCH', `/task-logs/${id}`, { minutes, date, note });
+    return `Updated ${fmtLog(log, false)}`;
+  }
+
+  if (action === 'delete') {
+    if (id == null) throw new Error('id is required to delete a time log');
+    await apiFn('DELETE', `/task-logs/${id}`);
+    return `Deleted log #${id}`;
+  }
+
+  const qs = new URLSearchParams();
+  if (from && to) { qs.set('from', from); qs.set('to', to); }
+  else if (date) qs.set('date', date);
+  const query = qs.toString();
+  const logs = await apiFn<TaskLog[]>('GET', `/me/task-logs${query ? `?${query}` : ''}`);
+  if (!logs.length) return '_No time logs found._';
+  const totalMinutes = logs.reduce((s, l) => s + l.minutes, 0);
+  return [`# Time Logs (${fmtHours(totalMinutes)}h total)`, ...logs.map(l => fmtLog(l))].join('\n');
+}
+
+export interface CommentArgs {
+  action: 'list' | 'add' | 'update' | 'delete';
+  entity_type?: 'task' | 'item' | 'feature';
+  entity_id?: number;
+  id?: number;
+  text?: string;
+}
+
+export async function comment(apiFn: ApiFn, args: CommentArgs): Promise<string> {
+  const { action, entity_type, entity_id, id, text } = args;
+
+  if (action === 'add') {
+    if (!entity_type || entity_id == null || !text) {
+      throw new Error('entity_type, entity_id, and text are required to add a comment');
+    }
+    const att = await apiFn<Attachment>('POST', `/attachments/${entity_type}/${entity_id}`, { kind: 'comment', text });
+    return `Added comment #${att.id} to ${entity_type}:${entity_id}`;
+  }
+
+  if (action === 'update') {
+    if (id == null || !text) throw new Error('id and text are required to update a comment');
+    const att = await apiFn<Attachment>('PATCH', `/attachments/${id}`, { text });
+    return `Updated comment #${att.id}`;
+  }
+
+  if (action === 'delete') {
+    if (id == null) throw new Error('id is required to delete a comment');
+    await apiFn('DELETE', `/attachments/${id}`);
+    return `Deleted comment #${id}`;
+  }
+
+  if (!entity_type || entity_id == null) {
+    throw new Error('entity_type and entity_id are required to list comments');
+  }
+  const items = await apiFn<Attachment[]>('GET', `/attachments/${entity_type}/${entity_id}`);
+  const cmts = items.filter(a => a.kind === 'comment');
+  if (!cmts.length) return `_No comments on ${entity_type}:${entity_id}._`;
+  return [
+    `# Comments on ${entity_type}:${entity_id} (${cmts.length})`,
+    ...cmts.map(c => `- [comment:${c.id}] user:${c.user_id ?? '?'} (${c.created ?? '—'}): ${c.text}`),
+  ].join('\n');
 }
