@@ -8,100 +8,109 @@ import { login, api, getMe } from './api.js';
 import { dashboard, updateWork, addTask, getItem, listUsers, notifications, logTime, comment } from './skills.js';
 import { loadConfig } from './config.js';
 import { startUpdateCheck } from './update.js';
+import { formatError } from './errors.js';
 import type { UpdateWorkArgs, AddTaskArgs, NotificationsArgs, LogTimeArgs, CommentArgs } from './skills.js';
+
+declare const __PKG_VERSION__: string;
+
+// Last-resort net: without this, any exception outside the try/catch blocks below
+// (or thrown asynchronously once the MCP server is running) prints a raw Node
+// stack trace and dies silently from Claude's perspective instead of a clean message.
+process.on('uncaughtException', (err) => {
+  process.stderr.write(`viot-tasktisk: ${formatError(err)}\n`);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  process.stderr.write(`viot-tasktisk: ${formatError(reason)}\n`);
+  process.exit(1);
+});
 
 const subcommand = process.argv[2];
 const subArgs = process.argv.slice(3);
 
-// ── Setup / maintenance subcommands ──────────────────────────────────────────
+// ── CLI subcommand dispatch ────────────────────────────────────────────────────
+// Each handler lazily imports its module so a plain CLI invocation doesn't pull in
+// the MCP server/login path. Add new subcommands as another entry here.
 
-if (subcommand === 'setup') {
-  const { runSetup } = await import('./setup.js');
-  await runSetup();
+type CommandFn = (args: string[]) => Promise<void>;
+
+const commands: Record<string, CommandFn> = {
+  setup: async () => {
+    const { runSetup } = await import('./setup.js');
+    await runSetup();
+  },
+  configure: async () => {
+    const { runConfigure } = await import('./setup.js');
+    let prefix: string | undefined;
+    try { prefix = loadConfig().installPrefix; } catch { /* ok */ }
+    await runConfigure(prefix);
+  },
+  update: async () => {
+    const { runUpdate } = await import('./update.js');
+    await runUpdate();
+  },
+  dashboard: async () => {
+    const { runDashboard } = await import('./cli.js');
+    await runDashboard();
+  },
+  'my-tasks': async () => {
+    const { runDashboard } = await import('./cli.js');
+    await runDashboard();
+  },
+  'get-item': async (args) => {
+    const { runGetItem } = await import('./cli.js');
+    await runGetItem(args);
+  },
+  'add-task': async (args) => {
+    const { runAddTask } = await import('./cli.js');
+    await runAddTask(args);
+  },
+  'update-task': async (args) => {
+    const { runUpdateTask } = await import('./cli.js');
+    await runUpdateTask(args);
+  },
+  'update-item': async (args) => {
+    const { runUpdateItem } = await import('./cli.js');
+    await runUpdateItem(args);
+  },
+  'list-users': async () => {
+    const { runListUsers } = await import('./cli.js');
+    await runListUsers();
+  },
+  notifications: async (args) => {
+    const { runNotifications } = await import('./cli.js');
+    await runNotifications(args);
+  },
+  'log-time': async (args) => {
+    const { runLogTime } = await import('./cli.js');
+    await runLogTime(args);
+  },
+  comment: async (args) => {
+    const { runComment } = await import('./cli.js');
+    await runComment(args);
+  },
+  '--help': async () => { (await import('./cli.js')).printHelp(); },
+  '-h': async () => { (await import('./cli.js')).printHelp(); },
+  help: async () => { (await import('./cli.js')).printHelp(); },
+};
+
+if (subcommand && subcommand in commands) {
+  try {
+    await commands[subcommand](subArgs);
+  } catch (e) {
+    process.stderr.write(`viot-tasktisk: ${formatError(e)}\n`);
+    process.exit(1);
+  }
   process.exit(0);
 }
 
-if (subcommand === 'configure') {
-  const { runConfigure } = await import('./setup.js');
-  let prefix: string | undefined;
-  try { prefix = loadConfig().installPrefix; } catch { /* ok */ }
-  await runConfigure(prefix);
-  process.exit(0);
-}
-
-if (subcommand === 'update') {
-  const { runUpdate } = await import('./update.js');
-  await runUpdate();
-  process.exit(0);
-}
-
-// ── Direct CLI commands ───────────────────────────────────────────────────────
-
-if (subcommand === 'dashboard' || subcommand === 'my-tasks') {
-  const { runDashboard } = await import('./cli.js');
-  await runDashboard();
-  process.exit(0);
-}
-
-if (subcommand === 'get-item') {
-  const { runGetItem } = await import('./cli.js');
-  await runGetItem(subArgs);
-  process.exit(0);
-}
-
-if (subcommand === 'add-task') {
-  const { runAddTask } = await import('./cli.js');
-  await runAddTask(subArgs);
-  process.exit(0);
-}
-
-if (subcommand === 'update-task') {
-  const { runUpdateTask } = await import('./cli.js');
-  await runUpdateTask(subArgs);
-  process.exit(0);
-}
-
-if (subcommand === 'update-item') {
-  const { runUpdateItem } = await import('./cli.js');
-  await runUpdateItem(subArgs);
-  process.exit(0);
-}
-
-if (subcommand === 'list-users') {
-  const { runListUsers } = await import('./cli.js');
-  await runListUsers();
-  process.exit(0);
-}
-
-if (subcommand === 'notifications') {
-  const { runNotifications } = await import('./cli.js');
-  await runNotifications(subArgs);
-  process.exit(0);
-}
-
-if (subcommand === 'log-time') {
-  const { runLogTime } = await import('./cli.js');
-  await runLogTime(subArgs);
-  process.exit(0);
-}
-
-if (subcommand === 'comment') {
-  const { runComment } = await import('./cli.js');
-  await runComment(subArgs);
-  process.exit(0);
-}
-
-if (subcommand === '--help' || subcommand === '-h' || subcommand === 'help') {
-  const { printHelp } = await import('./cli.js');
-  printHelp();
-  process.exit(0);
-}
+// ── MCP server (default, no subcommand) ────────────────────────────────────────
 
 let cfg;
 try {
   cfg = loadConfig();
 } catch (e) {
-  process.stderr.write(`${(e as Error).message}\n`);
+  process.stderr.write(`${formatError(e)}\n`);
   process.exit(1);
 }
 
@@ -110,12 +119,12 @@ try {
   process.stderr.write(`viot-tasktisk: logged in as ${me.name} (${me.role})\n`);
   startUpdateCheck(); // fire-and-forget; notifies via stderr + dashboard banner
 } catch (e) {
-  process.stderr.write(`Login failed: ${(e as Error).message}\n`);
+  process.stderr.write(`Login failed: ${formatError(e)}\n`);
   process.exit(1);
 }
 
 const server = new Server(
-  { name: 'viot-tasktisk', version: '1.0.0' },
+  { name: 'viot-tasktisk', version: __PKG_VERSION__ },
   { capabilities: { tools: {} } }
 );
 

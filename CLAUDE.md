@@ -63,12 +63,16 @@ nothing about MCP or the CLI. `src/index.ts` wires them into `ListToolsRequestSc
 print to stdout and `process.exit()`. When changing tool behavior, edit `skills.ts`; when changing how
 a tool is invoked/parsed, edit `index.ts` (MCP schema) or `cli.ts` (flag parsing) respectively.
 
-**`src/index.ts` dispatches on `argv[2]` before starting the server.** `setup`, `configure`, `update`,
-`dashboard`/`my-tasks`, `get-item`, `add-task`, `update-task`, `update-item`, and `--help` are all
-handled as early-return subcommands (each lazily `import()`s its module). Only when none of those match
-does it fall through to `loadConfig()` → `login()` → start the MCP `Server` on stdio. Add new
-subcommands as another early-return branch here, and add the corresponding MCP tool definition +
-`CallToolRequestSchema` case if it should also be callable from Claude.
+**`src/index.ts` dispatches on `argv[2]` via a `commands` lookup table before starting the server.**
+Each entry is a lazy-importing async handler; the whole dispatch is wrapped in one try/catch that
+formats errors through `src/errors.ts` (`formatError`) and exits 1, so a thrown error anywhere in a
+subcommand's call chain — bad config, DNS/network failure, HTTP error — surfaces as one clean
+`viot-tasktisk: <message>` line instead of a raw Node stack trace. Top-level `uncaughtException` /
+`unhandledRejection` handlers are also registered as a last-resort net for anything outside that path
+(e.g. once the MCP server is running). Only when `argv[2]` matches no entry does it fall through to
+`loadConfig()` → `login()` → start the MCP `Server` on stdio. Add new subcommands as another entry in
+the `commands` table, and add the corresponding MCP tool definition + `CallToolRequestSchema` case in
+the same file if it should also be callable from Claude.
 
 **Config resolution (`src/config.ts`):** env vars (`QLDA_URL`/`QLDA_USERNAME`/`QLDA_PASSWORD`) always
 win over the config file at `~/.config/viot-tasktisk/config.json` (mode `0600`). `installPrefix` in that

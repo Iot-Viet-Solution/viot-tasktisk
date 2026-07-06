@@ -984,83 +984,122 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
+
+// src/errors.ts
+function formatError(err) {
+  if (err instanceof Error) {
+    const cause = err.cause;
+    switch (cause?.code) {
+      case "EAI_AGAIN":
+      case "ENOTFOUND":
+        return `Could not resolve host${cause.hostname ? ` "${cause.hostname}"` : ""} \u2014 check the url in your config (run \`viot-tasktisk setup\` to fix it).`;
+      case "ECONNREFUSED":
+        return "Connection refused \u2014 is the QLDA server running and reachable at that url?";
+      case "ETIMEDOUT":
+      case "UND_ERR_CONNECT_TIMEOUT":
+        return "Connection timed out \u2014 check the url in your config and your network.";
+    }
+    return err.message;
+  }
+  return String(err);
+}
+
+// src/index.ts
+process.on("uncaughtException", (err) => {
+  process.stderr.write(`viot-tasktisk: ${formatError(err)}
+`);
+  process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  process.stderr.write(`viot-tasktisk: ${formatError(reason)}
+`);
+  process.exit(1);
+});
 var subcommand = process.argv[2];
 var subArgs = process.argv.slice(3);
-if (subcommand === "setup") {
-  const { runSetup: runSetup2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));
-  await runSetup2();
-  process.exit(0);
-}
-if (subcommand === "configure") {
-  const { runConfigure: runConfigure2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));
-  let prefix;
-  try {
-    prefix = loadConfig().installPrefix;
-  } catch {
+var commands = {
+  setup: async () => {
+    const { runSetup: runSetup2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));
+    await runSetup2();
+  },
+  configure: async () => {
+    const { runConfigure: runConfigure2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));
+    let prefix;
+    try {
+      prefix = loadConfig().installPrefix;
+    } catch {
+    }
+    await runConfigure2(prefix);
+  },
+  update: async () => {
+    const { runUpdate: runUpdate2 } = await Promise.resolve().then(() => (init_update(), update_exports));
+    await runUpdate2();
+  },
+  dashboard: async () => {
+    const { runDashboard: runDashboard2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runDashboard2();
+  },
+  "my-tasks": async () => {
+    const { runDashboard: runDashboard2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runDashboard2();
+  },
+  "get-item": async (args) => {
+    const { runGetItem: runGetItem2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runGetItem2(args);
+  },
+  "add-task": async (args) => {
+    const { runAddTask: runAddTask2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runAddTask2(args);
+  },
+  "update-task": async (args) => {
+    const { runUpdateTask: runUpdateTask2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runUpdateTask2(args);
+  },
+  "update-item": async (args) => {
+    const { runUpdateItem: runUpdateItem2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runUpdateItem2(args);
+  },
+  "list-users": async () => {
+    const { runListUsers: runListUsers2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runListUsers2();
+  },
+  notifications: async (args) => {
+    const { runNotifications: runNotifications2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runNotifications2(args);
+  },
+  "log-time": async (args) => {
+    const { runLogTime: runLogTime2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runLogTime2(args);
+  },
+  comment: async (args) => {
+    const { runComment: runComment2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runComment2(args);
+  },
+  "--help": async () => {
+    (await Promise.resolve().then(() => (init_cli(), cli_exports))).printHelp();
+  },
+  "-h": async () => {
+    (await Promise.resolve().then(() => (init_cli(), cli_exports))).printHelp();
+  },
+  help: async () => {
+    (await Promise.resolve().then(() => (init_cli(), cli_exports))).printHelp();
   }
-  await runConfigure2(prefix);
-  process.exit(0);
-}
-if (subcommand === "update") {
-  const { runUpdate: runUpdate2 } = await Promise.resolve().then(() => (init_update(), update_exports));
-  await runUpdate2();
-  process.exit(0);
-}
-if (subcommand === "dashboard" || subcommand === "my-tasks") {
-  const { runDashboard: runDashboard2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
-  await runDashboard2();
-  process.exit(0);
-}
-if (subcommand === "get-item") {
-  const { runGetItem: runGetItem2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
-  await runGetItem2(subArgs);
-  process.exit(0);
-}
-if (subcommand === "add-task") {
-  const { runAddTask: runAddTask2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
-  await runAddTask2(subArgs);
-  process.exit(0);
-}
-if (subcommand === "update-task") {
-  const { runUpdateTask: runUpdateTask2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
-  await runUpdateTask2(subArgs);
-  process.exit(0);
-}
-if (subcommand === "update-item") {
-  const { runUpdateItem: runUpdateItem2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
-  await runUpdateItem2(subArgs);
-  process.exit(0);
-}
-if (subcommand === "list-users") {
-  const { runListUsers: runListUsers2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
-  await runListUsers2();
-  process.exit(0);
-}
-if (subcommand === "notifications") {
-  const { runNotifications: runNotifications2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
-  await runNotifications2(subArgs);
-  process.exit(0);
-}
-if (subcommand === "log-time") {
-  const { runLogTime: runLogTime2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
-  await runLogTime2(subArgs);
-  process.exit(0);
-}
-if (subcommand === "comment") {
-  const { runComment: runComment2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
-  await runComment2(subArgs);
-  process.exit(0);
-}
-if (subcommand === "--help" || subcommand === "-h" || subcommand === "help") {
-  const { printHelp: printHelp2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
-  printHelp2();
+};
+if (subcommand && subcommand in commands) {
+  try {
+    await commands[subcommand](subArgs);
+  } catch (e) {
+    process.stderr.write(`viot-tasktisk: ${formatError(e)}
+`);
+    process.exit(1);
+  }
   process.exit(0);
 }
 var cfg;
 try {
   cfg = loadConfig();
 } catch (e) {
-  process.stderr.write(`${e.message}
+  process.stderr.write(`${formatError(e)}
 `);
   process.exit(1);
 }
@@ -1070,12 +1109,12 @@ try {
 `);
   startUpdateCheck();
 } catch (e) {
-  process.stderr.write(`Login failed: ${e.message}
+  process.stderr.write(`Login failed: ${formatError(e)}
 `);
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.0.0" },
+  { name: "viot-tasktisk", version: "1.1.0" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
