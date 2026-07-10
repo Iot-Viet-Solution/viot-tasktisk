@@ -276,6 +276,389 @@ export async function listUsers(apiFn: ApiFn): Promise<string> {
   return ['# Users', ...users.map(u => `- [user:${u.id}] ${u.name} (${u.role})`)].join('\n');
 }
 
+interface Project {
+  id: number;
+  name: string;
+  customer: string | null;
+  pm: number | null;
+  status: string;
+  progress?: number;
+  md_budget?: number;
+  md_used?: number;
+  start?: string | null;
+  end?: string | null;
+}
+
+export interface ListProjectsArgs {
+  /** Chỉ lấy dự án mà mình là PM (Project Manager). Mặc định false = toàn bộ */
+  mine_only?: boolean;
+  /** Lọc theo trạng thái: Demo · Đang chạy · Bảo trì · Tạm dừng · Đóng · Huỷ */
+  status?: string;
+}
+
+export async function listProjects(
+  apiFn: ApiFn,
+  me: User | null,
+  args: ListProjectsArgs = {}
+): Promise<string> {
+  const { mine_only, status } = args;
+  let projs = await apiFn<Project[]>('GET', '/projects');
+  if (mine_only && me) projs = projs.filter(p => p.pm === me.id);
+  if (status) projs = projs.filter(p => p.status === status);
+  if (!projs.length) {
+    return mine_only ? '_Bạn không phải PM của dự án nào._' : '_No projects found._';
+  }
+  const title = mine_only
+    ? `# Dự án của tôi (${projs.length})`
+    : `# Projects (${projs.length})`;
+  const lines: string[] = [title, ''];
+  projs.forEach(p => {
+    lines.push(`- **[project:${p.id}]** ${p.name}`);
+    const meta1 = [
+      p.customer ? `KH: ${p.customer}` : null,
+      `Status: ${p.status}`,
+      `Tiến độ: ${p.progress ?? 0}%`,
+    ].filter(Boolean).join(' · ');
+    lines.push(`  ${meta1}`);
+    const meta2 = [
+      `MD: ${p.md_used ?? 0}/${p.md_budget ?? 0}`,
+      `${p.start || '—'} → ${p.end || '—'}`,
+    ].join(' · ');
+    lines.push(`  ${meta2}`);
+  });
+  return lines.join('\n');
+}
+
+/* ================================================================
+ * PROJECT — get detail, update, health, EVM, members, sprints
+ * ================================================================ */
+
+interface Block {
+  id: number; code: string | null; name: string;
+  features?: Array<{
+    id: number; code: string | null; name: string;
+    pd: number; pb: number; pv: number; pf: number;
+    md: number; priority: string; pct?: number;
+    start: string | null; end: string | null;
+  }>;
+}
+interface Sprint {
+  id: number; name: string; goal: string | null;
+  status: string | null; start: string | null; end: string | null;
+}
+interface Feedback { id: number; type: string | null; status: string | null; item?: string; }
+interface Risk { id: number; title: string; category: string | null; probability: number; impact: number; status: string; }
+interface MeetingSummary {
+  id: number; title: string; type: string | null; date: string | null;
+  attendees?: string[]; purpose?: string | null; summary?: string | null;
+  actions?: Array<{ id: number; text: string; kind?: string; proposer?: string | null; assignee_text?: string | null; due?: string | null; assignee?: number | null }>;
+}
+interface ProjectDetail {
+  id: number; name: string; customer: string | null; customer_id: number | null;
+  status: string; stage: number; manual_stage?: string | null;
+  start: string | null; end: string | null;
+  warranty_start?: string | null; warranty_end?: string | null;
+  md_budget: number; md_used: number; pm: number | null;
+  vision?: string | null; progress?: number;
+  blocks?: Block[]; sprints?: Sprint[];
+  meetings?: MeetingSummary[]; feedback?: Feedback[];
+  tasks?: TaskWithMeta[]; risks?: Risk[];
+  documents?: Array<{ id: number; name: string; type: string; }>;
+  gates?: Array<{ code: string; passed: 0 | 1; }>;
+}
+
+export async function getProject(apiFn: ApiFn, { id }: { id: number }): Promise<string> {
+  const p = await apiFn<ProjectDetail>('GET', `/projects/${id}`);
+  const blocks = p.blocks || [];
+  const featCount = blocks.reduce((n, b) => n + (b.features?.length || 0), 0);
+  const lines: string[] = [];
+  lines.push(`# Dự án #${p.id}: ${p.name}`);
+  lines.push(`KH: ${p.customer || '—'} · Status: ${p.status} · Tiến độ: ${p.progress ?? 0}%`);
+  lines.push(`MD: ${p.md_used}/${p.md_budget} · Start → End: ${p.start || '—'} → ${p.end || '—'}`);
+  if (p.warranty_start || p.warranty_end) {
+    lines.push(`Bảo hành: ${p.warranty_start || '—'} → ${p.warranty_end || '—'}`);
+  }
+  if (p.vision) lines.push(`\n**Vision**: ${p.vision}`);
+  lines.push(`\n## Cấu trúc: ${blocks.length} khối · ${featCount} tính năng · ${(p.sprints || []).length} sprint · ${(p.meetings || []).length} cuộc họp`);
+  if (blocks.length) {
+    lines.push('\n### Khối & Tính năng');
+    blocks.forEach(b => {
+      lines.push(`- [block:${b.id}] **${b.code || ''}** ${b.name} (${b.features?.length || 0} tính năng)`);
+      (b.features || []).slice(0, 8).forEach(f => {
+        lines.push(`   · [feature:${f.id}] ${f.code || ''} ${f.name} — ${f.pct ?? 0}% · ${f.md} MD · ${f.priority}`);
+      });
+      if ((b.features?.length || 0) > 8) lines.push(`   … và ${(b.features!.length - 8)} tính năng nữa`);
+    });
+  }
+  const sp = p.sprints || [];
+  if (sp.length) {
+    lines.push(`\n### Sprint (${sp.length})`);
+    sp.forEach(s => lines.push(`- [sprint:${s.id}] ${s.name} · ${s.status || 'Kế hoạch'} · ${s.start || '—'} → ${s.end || '—'}`));
+  }
+  const gates = (p.gates || []).filter(g => g.passed);
+  if (gates.length) lines.push(`\n**Gate đã qua**: ${gates.map(g => g.code).join(' · ')}`);
+  return lines.join('\n');
+}
+
+export interface UpdateProjectArgs {
+  id: number;
+  name?: string;
+  customer?: string;
+  customer_id?: number;
+  status?: string;
+  md_budget?: number;
+  start?: string;
+  end?: string;
+  warranty_start?: string;
+  warranty_end?: string;
+  pm?: number;
+  vision?: string;
+}
+
+export async function updateProject(apiFn: ApiFn, args: UpdateProjectArgs): Promise<string> {
+  const { id, ...rest } = args;
+  const patch: Record<string, unknown> = {};
+  for (const k of Object.keys(rest) as (keyof typeof rest)[]) {
+    if (rest[k] !== undefined) patch[k] = rest[k];
+  }
+  if (!Object.keys(patch).length) return 'Không có gì để cập nhật.';
+  await apiFn('PATCH', `/projects/${id}`, patch);
+  const fields = Object.keys(patch).join(', ');
+  return `Đã cập nhật dự án #${id}: ${fields}`;
+}
+
+/* ---- Health & EVM: tính client-side từ project detail ---- */
+
+function computeHealth(p: ProjectDetail): { overall: 'ok' | 'warn' | 'bad'; score: number; indicators: Array<{ label: string; val: string; sub: string; state: string; note: string }> } {
+  const inds: Array<{ label: string; val: string; sub: string; state: string; note: string }> = [];
+  const mdPct = p.md_budget ? Math.round((p.md_used || 0) / p.md_budget * 100) : 0;
+  const actPct = p.progress || 0;
+  const dlt = actPct - mdPct;
+  const perfState = dlt >= -5 ? 'ok' : (dlt >= -15 ? 'warn' : 'bad');
+  inds.push({ label: 'Tiến độ', val: actPct + '%', sub: 'vs ' + mdPct + '% MD', state: perfState, note: dlt >= 0 ? 'Đang vượt kế hoạch' : dlt >= -15 ? 'Chậm nhẹ' : 'Chậm đáng kể' });
+  const bdgState = mdPct <= 85 ? 'ok' : (mdPct <= 100 ? 'warn' : 'bad');
+  inds.push({ label: 'Ngân sách', val: mdPct + '%', sub: (p.md_used || 0) + '/' + p.md_budget + ' MD', state: bdgState, note: mdPct <= 85 ? 'Còn dư địa' : mdPct <= 100 ? 'Cận trần' : 'Vượt ngân sách' });
+  const fb = p.feedback || [];
+  const openFb = fb.filter(f => f.status !== 'Đã xử lý' && f.status !== 'Đã đóng').length;
+  const critFb = fb.filter(f => f.type === 'Lỗi' && f.status !== 'Đã xử lý' && f.status !== 'Đã đóng').length;
+  const fbState = critFb >= 3 ? 'bad' : (critFb >= 1 || openFb >= 5 ? 'warn' : 'ok');
+  inds.push({ label: 'Phản hồi mở', val: String(openFb), sub: critFb + ' Lỗi nghiêm trọng', state: fbState, note: critFb >= 3 ? 'Nhiều lỗi cần xử lý' : critFb >= 1 ? 'Có lỗi ưu tiên' : 'Trong tầm kiểm soát' });
+  const tasks = p.tasks || [];
+  const today = new Date().toISOString().slice(0, 10);
+  const overdue = tasks.filter(t => t.due && t.due < today && t.status !== 'Done' && t.status !== 'Close').length;
+  const needHelp = tasks.filter(t => t.status === 'Need help').length;
+  const tkState = (overdue >= 5 || needHelp >= 3) ? 'bad' : (overdue >= 1 || needHelp >= 1) ? 'warn' : 'ok';
+  inds.push({ label: 'Task', val: overdue + ' quá hạn', sub: needHelp + ' cần hỗ trợ', state: tkState, note: overdue === 0 && needHelp === 0 ? 'Đúng tiến độ' : 'Cần chú ý' });
+  const risks = p.risks || [];
+  const high = risks.filter(r => r.status !== 'Đã đóng' && (r.probability || 0) * (r.impact || 0) >= 16).length;
+  const med = risks.filter(r => r.status !== 'Đã đóng' && (r.probability || 0) * (r.impact || 0) >= 9 && (r.probability || 0) * (r.impact || 0) < 16).length;
+  const rkState = high >= 2 ? 'bad' : (high >= 1 || med >= 3) ? 'warn' : 'ok';
+  inds.push({ label: 'Rủi ro', val: high + ' Cao', sub: med + ' TB', state: rkState, note: high >= 2 ? 'Cần can thiệp ngay' : 'Trong tầm kiểm soát' });
+  const bads = inds.filter(x => x.state === 'bad').length;
+  const warns = inds.filter(x => x.state === 'warn').length;
+  const overall: 'ok' | 'warn' | 'bad' = bads >= 2 ? 'bad' : (bads >= 1 || warns >= 2) ? 'warn' : 'ok';
+  const score = Math.round(inds.filter(x => x.state === 'ok').length / inds.length * 100);
+  return { overall, score, indicators: inds };
+}
+
+export async function projectHealth(apiFn: ApiFn, { id }: { id: number }): Promise<string> {
+  const p = await apiFn<ProjectDetail>('GET', `/projects/${id}`);
+  const H = computeHealth(p);
+  const icons = { ok: '🟢', warn: '🟡', bad: '🔴' };
+  const label = { ok: 'Khoẻ mạnh', warn: 'Cần chú ý', bad: 'Rủi ro cao' };
+  const lines: string[] = [];
+  lines.push(`# Sức khoẻ dự án — ${p.name}`);
+  lines.push(`${icons[H.overall]} **${label[H.overall]}** · Điểm: **${H.score}/100**\n`);
+  lines.push('## Chỉ số chi tiết');
+  H.indicators.forEach(x => {
+    lines.push(`- ${icons[x.state as 'ok' | 'warn' | 'bad']} **${x.label}**: ${x.val} · ${x.sub} — ${x.note}`);
+  });
+  return lines.join('\n');
+}
+
+export async function projectEvm(apiFn: ApiFn, { id }: { id: number }): Promise<string> {
+  const p = await apiFn<ProjectDetail>('GET', `/projects/${id}`);
+  const BAC = p.md_budget || 0;
+  const EV = BAC * (p.progress || 0) / 100;
+  const AC = p.md_used || 0;
+  const startD = p.start ? new Date(p.start) : null;
+  const endD = p.end ? new Date(p.end) : null;
+  let pctTime = 0;
+  if (startD && endD && endD > startD) {
+    pctTime = Math.max(0, Math.min(100, (Date.now() - +startD) / (+endD - +startD) * 100));
+  }
+  const PV = BAC * pctTime / 100;
+  const CV = EV - AC, SV = EV - PV;
+  const CPI = AC > 0 ? EV / AC : null;
+  const SPI = PV > 0 ? EV / PV : null;
+  const EAC = CPI ? BAC / CPI : null;
+  const r = (n: number, d = 1) => Math.round(n * Math.pow(10, d)) / Math.pow(10, d);
+  const lines: string[] = [];
+  lines.push(`# EVM (Earned Value Management) — ${p.name}\n`);
+  lines.push(`**BAC** (ngân sách tổng): ${BAC} MD`);
+  lines.push(`**EV**  (giá trị đã đạt): ${r(EV)} MD  = BAC × ${p.progress ?? 0}%`);
+  lines.push(`**AC**  (MD đã dùng): ${r(AC)} MD`);
+  lines.push(`**PV**  (kế hoạch theo lịch): ${r(PV)} MD  (${r(pctTime, 0)}% thời gian trôi)`);
+  lines.push('');
+  lines.push(`**CPI** (Cost Performance): ${CPI ? r(CPI, 2) : '—'} ${CPI && CPI < 0.9 ? '⚠ vượt ngân sách' : ''}`);
+  lines.push(`**SPI** (Schedule Performance): ${SPI ? r(SPI, 2) : '—'} ${SPI && SPI < 0.9 ? '⚠ chậm tiến độ' : ''}`);
+  lines.push(`**CV** = EV - AC = ${CV >= 0 ? '+' : ''}${r(CV)} MD`);
+  lines.push(`**SV** = EV - PV = ${SV >= 0 ? '+' : ''}${r(SV)} MD`);
+  lines.push(`**EAC** (dự báo tổng MD): ${EAC ? r(EAC) : '—'} MD`);
+  return lines.join('\n');
+}
+
+interface Member { id: number; user_id: number; user_name?: string; proj_role: string; added_at: string | null; }
+
+export async function listProjectMembers(apiFn: ApiFn, { id }: { id: number }): Promise<string> {
+  const members = await apiFn<Member[]>('GET', `/projects/${id}/members`);
+  if (!members.length) return `_Dự án #${id} chưa có thành viên._`;
+  const lines: string[] = [`# Thành viên dự án #${id} (${members.length})`, ''];
+  members.forEach(m => {
+    lines.push(`- [user:${m.user_id}] ${m.user_name || 'user #' + m.user_id} · **${m.proj_role}** · joined ${m.added_at || '—'}`);
+  });
+  return lines.join('\n');
+}
+
+export async function listSprints(apiFn: ApiFn, { id }: { id: number }): Promise<string> {
+  const p = await apiFn<ProjectDetail>('GET', `/projects/${id}`);
+  const sp = p.sprints || [];
+  if (!sp.length) return `_Dự án #${id} chưa có sprint._`;
+  const lines: string[] = [`# Sprint dự án #${id} (${sp.length})`, ''];
+  sp.forEach(s => {
+    lines.push(`- [sprint:${s.id}] **${s.name}** · ${s.status || 'Kế hoạch'} · ${s.start || '—'} → ${s.end || '—'}`);
+    if (s.goal) lines.push(`   Mục tiêu: ${s.goal}`);
+  });
+  return lines.join('\n');
+}
+
+/* ================================================================
+ * MEETINGS — list, get, add, update, add_action
+ * ================================================================ */
+
+export async function listMeetings(apiFn: ApiFn, { id }: { id: number }): Promise<string> {
+  const meetings = await apiFn<MeetingSummary[]>('GET', `/projects/${id}/meetings`);
+  if (!meetings.length) return `_Dự án #${id} chưa có cuộc họp._`;
+  const lines: string[] = [`# Cuộc họp dự án #${id} (${meetings.length})`, ''];
+  meetings.forEach(m => {
+    const acts = m.actions || [];
+    const disCount = acts.filter(a => (a.kind || 'discussion') === 'discussion' && (a.text || '').trim()).length;
+    const actCount = acts.filter(a => a.kind === 'action' && (a.text || '').trim()).length;
+    const hasSummary = !!(m.summary && m.summary.trim());
+    const chips = [
+      disCount ? `💬 ${disCount} ý kiến` : '',
+      actCount ? `📋 ${actCount} hành động` : '',
+      hasSummary ? '📝 có tổng kết' : '',
+    ].filter(Boolean).join(' · ');
+    lines.push(`- [meeting:${m.id}] **${m.title}** · ${m.type || '—'} · 📅 ${m.date || '—'}${chips ? ' · ' + chips : ''}`);
+  });
+  return lines.join('\n');
+}
+
+export async function getMeeting(apiFn: ApiFn, { id }: { id: number }): Promise<string> {
+  // Không có endpoint GET /meetings/:id → fetch qua project detail rồi filter.
+  // Cần biết project_id — gọi 1 lần /meetings/:id/tasks không có; workaround: dùng
+  // /projects danh sách rồi từng project lấy meetings. Optimize: gọi thẳng
+  // /projects/:pid nếu client biết. Nếu không, dùng approach naïve.
+  const projs = await apiFn<Array<{ id: number }>>('GET', '/projects');
+  for (const p of projs) {
+    const meetings = await apiFn<MeetingSummary[]>('GET', `/projects/${p.id}/meetings`);
+    const m = meetings.find(x => x.id === id);
+    if (m) return formatMeetingDetail(m);
+  }
+  return `_Không tìm thấy cuộc họp #${id}._`;
+}
+
+function formatMeetingDetail(m: MeetingSummary): string {
+  const lines: string[] = [];
+  lines.push(`# Cuộc họp #${m.id}: ${m.title}`);
+  lines.push(`Loại: ${m.type || '—'} · Ngày: ${m.date || '—'}`);
+  lines.push(`Tham dự: ${(m.attendees || []).join(', ') || '—'}`);
+  if (m.purpose) lines.push(`\n**🎯 Mục đích**\n${m.purpose}`);
+  if (m.summary) lines.push(`\n**📝 Tổng kết**\n${m.summary}`);
+  const acts = m.actions || [];
+  const discussions = acts.filter(a => (a.kind || 'discussion') === 'discussion');
+  const actions = acts.filter(a => a.kind === 'action');
+  if (discussions.length) {
+    lines.push(`\n## 💬 Nội dung thảo luận (${discussions.length})`);
+    discussions.forEach((a, i) => lines.push(`${i + 1}. ${a.text} — _${a.proposer || 'ẩn danh'}_`));
+  }
+  if (actions.length) {
+    lines.push(`\n## 📋 Kế hoạch hành động (${actions.length})`);
+    actions.forEach((a, i) => {
+      const who = a.assignee_text || (a.assignee ? 'user #' + a.assignee : 'chưa giao');
+      lines.push(`${i + 1}. ${a.text} — 👤 ${who} · ⏰ ${a.due || 'chưa đặt hạn'}`);
+    });
+  }
+  return lines.join('\n');
+}
+
+export interface AddMeetingArgs {
+  project_id: number;
+  title: string;
+  type?: 'Khách hàng' | 'Review nội bộ';
+  date?: string;
+  attendees?: string[];
+  purpose?: string;
+}
+
+export async function addMeeting(apiFn: ApiFn, args: AddMeetingArgs): Promise<string> {
+  const { project_id, ...rest } = args;
+  const body = {
+    title: rest.title,
+    type: rest.type || 'Review nội bộ',
+    date: rest.date || new Date().toISOString().slice(0, 10),
+    attendees: rest.attendees || [],
+    purpose: rest.purpose || '',
+  };
+  const m = await apiFn<MeetingSummary>('POST', `/projects/${project_id}/meetings`, body);
+  return `Đã tạo cuộc họp [meeting:${m.id}] "${m.title}" ngày ${m.date}. Nhập ý kiến/tổng kết bằng update_meeting hoặc add_meeting_action.`;
+}
+
+export interface UpdateMeetingArgs {
+  id: number;
+  title?: string;
+  type?: 'Khách hàng' | 'Review nội bộ';
+  date?: string;
+  attendees?: string[];
+  purpose?: string;
+  summary?: string;
+}
+
+export async function updateMeeting(apiFn: ApiFn, args: UpdateMeetingArgs): Promise<string> {
+  const { id, ...rest } = args;
+  const patch: Record<string, unknown> = {};
+  for (const k of Object.keys(rest) as (keyof typeof rest)[]) {
+    if (rest[k] !== undefined) patch[k] = rest[k];
+  }
+  if (!Object.keys(patch).length) return 'Không có gì để cập nhật.';
+  await apiFn('PATCH', `/meetings/${id}`, patch);
+  return `Đã cập nhật cuộc họp #${id}: ${Object.keys(patch).join(', ')}`;
+}
+
+export interface AddMeetingActionArgs {
+  meeting_id: number;
+  text: string;
+  kind?: 'discussion' | 'action';
+  proposer?: string;
+  assignee_text?: string;
+  due?: string;
+}
+
+export async function addMeetingAction(apiFn: ApiFn, args: AddMeetingActionArgs): Promise<string> {
+  const { meeting_id, ...rest } = args;
+  const kind = rest.kind || 'discussion';
+  const body = {
+    text: rest.text,
+    kind,
+    proposer: rest.proposer || null,
+    assignee_text: rest.assignee_text || null,
+    due: rest.due || null,
+  };
+  const a = await apiFn<{ id: number }>('POST', `/meetings/${meeting_id}/actions`, body);
+  return `Đã thêm ${kind === 'action' ? 'hành động' : 'ý kiến'} #${a.id} vào cuộc họp #${meeting_id}.`;
+}
+
 export interface NotificationsArgs {
   unread_only?: boolean;
   limit?: number;

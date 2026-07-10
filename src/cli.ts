@@ -4,7 +4,7 @@
  */
 
 import { login, api } from './api.js';
-import { dashboard, updateWork, addTask, getItem, listUsers, notifications, logTime, comment } from './skills.js';
+import { dashboard, updateWork, addTask, getItem, listUsers, listProjects, notifications, logTime, comment } from './skills.js';
 import type { CommentArgs } from './skills.js';
 import { loadConfig, CONFIG_PATH } from './config.js';
 
@@ -122,6 +122,17 @@ export async function runWhoami(): Promise<void> {
 export async function runListUsers(): Promise<void> {
   await loginFromConfig();
   const text = await listUsers(api);
+  console.log(text);
+}
+
+export async function runListProjects(rawArgs: string[]): Promise<void> {
+  const { flags } = parseFlags(rawArgs);
+  await loginFromConfig();
+  const { getMe } = await import('./api.js');
+  const text = await listProjects(api, getMe(), {
+    mine_only: flags.mine === 'true' || flags['mine-only'] === 'true',
+    status: flags.status,
+  });
   console.log(text);
 }
 
@@ -247,6 +258,8 @@ Direct CLI commands (no MCP client needed):
                                       Update item status
                                       (Todo/Doing/Review/Done/Cancelled)
   viot-tasktisk list-users            List all users (id, name, role)
+  viot-tasktisk list-projects [--mine] [--status <status>]
+                                      List projects (--mine = only where I am PM)
   viot-tasktisk notifications [--unread] [--limit N]
                                       Show your notifications + unread count
   viot-tasktisk notifications read <id>

@@ -5,11 +5,20 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { login, api, getMe } from './api.js';
-import { dashboard, updateWork, addTask, getItem, listUsers, notifications, logTime, comment } from './skills.js';
+import {
+  dashboard, updateWork, addTask, getItem, listUsers, listProjects,
+  getProject, updateProject, projectHealth, projectEvm, listProjectMembers, listSprints,
+  listMeetings, getMeeting, addMeeting, updateMeeting, addMeetingAction,
+  notifications, logTime, comment,
+} from './skills.js';
 import { loadConfig } from './config.js';
 import { startUpdateCheck } from './update.js';
 import { formatError } from './errors.js';
-import type { UpdateWorkArgs, AddTaskArgs, NotificationsArgs, LogTimeArgs, CommentArgs } from './skills.js';
+import type {
+  UpdateWorkArgs, AddTaskArgs, ListProjectsArgs,
+  UpdateProjectArgs, AddMeetingArgs, UpdateMeetingArgs, AddMeetingActionArgs,
+  NotificationsArgs, LogTimeArgs, CommentArgs,
+} from './skills.js';
 
 declare const __PKG_VERSION__: string;
 
@@ -80,6 +89,10 @@ const commands: Record<string, CommandFn> = {
   'list-users': async () => {
     const { runListUsers } = await import('./cli.js');
     await runListUsers();
+  },
+  'list-projects': async (args) => {
+    const { runListProjects } = await import('./cli.js');
+    await runListProjects(args);
   },
   notifications: async (args) => {
     const { runNotifications } = await import('./cli.js');
@@ -197,6 +210,167 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: { type: 'object' as const, properties: {} },
     },
     {
+      name: 'list_projects',
+      description:
+        'List projects with basic info: id, name, customer, status, progress %, MD used/budget, start/end. ' +
+        'Set mine_only=true to only get projects where the logged-in user is PM.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          mine_only: { type: 'boolean', description: 'Only projects where I am PM (optional)' },
+          status:    { type: 'string', description: 'Filter by status: Demo · Đang chạy · Bảo trì · Tạm dừng · Đóng · Huỷ (optional)' },
+        },
+      },
+    },
+    {
+      name: 'get_project',
+      description:
+        'Get project detail: blocks + features (with progress %), sprints, gates passed. ' +
+        'Use this to understand project structure before drilling into meetings/tasks/items.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: { id: { type: 'number', description: 'Project ID' } },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'update_project',
+      description:
+        'Update project fields: name, customer, status, MD budget, start/end dates, warranty dates, PM, vision. ' +
+        'Only fields provided are patched.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          id:              { type: 'number', description: 'Project ID' },
+          name:            { type: 'string' },
+          customer:        { type: 'string' },
+          customer_id:     { type: 'number', description: 'ID from customer directory (optional)' },
+          status:          { type: 'string', enum: ['Demo', 'Đang chạy', 'Bảo trì', 'Tạm dừng', 'Đóng', 'Huỷ'] },
+          md_budget:       { type: 'number', description: 'ManDay budget' },
+          start:           { type: 'string', description: 'Start date YYYY-MM-DD' },
+          end:             { type: 'string', description: 'End date YYYY-MM-DD' },
+          warranty_start:  { type: 'string', description: 'Warranty start YYYY-MM-DD' },
+          warranty_end:    { type: 'string', description: 'Warranty end YYYY-MM-DD' },
+          pm:              { type: 'number', description: 'User ID of PM' },
+          vision:          { type: 'string' },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'project_health',
+      description:
+        'Compute RAG (Red/Amber/Green) health for a project across 5 indicators: ' +
+        'Tiến độ, Ngân sách, Phản hồi mở, Task quá hạn, Rủi ro. Returns overall status + score 0-100.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: { id: { type: 'number', description: 'Project ID' } },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'project_evm',
+      description:
+        'Compute PMBOK Earned Value Management for a project: BAC · EV · AC · PV · CPI · SPI · CV · SV · EAC. ' +
+        'CPI/SPI < 0.9 = red flag.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: { id: { type: 'number', description: 'Project ID' } },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'list_project_members',
+      description: 'List members of a project (user_id, name, project role, joined date).',
+      inputSchema: {
+        type: 'object' as const,
+        properties: { id: { type: 'number', description: 'Project ID' } },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'list_sprints',
+      description: 'List sprints of a project (name, status, start/end, goal).',
+      inputSchema: {
+        type: 'object' as const,
+        properties: { id: { type: 'number', description: 'Project ID' } },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'list_meetings',
+      description:
+        'List meetings of a project with compact summary chips: X ý kiến · Y hành động · có tổng kết. ' +
+        'Use get_meeting for full detail.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: { id: { type: 'number', description: 'Project ID' } },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'get_meeting',
+      description:
+        'Get meeting detail: purpose, tổng kết, nội dung thảo luận, kế hoạch hành động (với người phụ trách + hạn).',
+      inputSchema: {
+        type: 'object' as const,
+        properties: { id: { type: 'number', description: 'Meeting ID' } },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'add_meeting',
+      description: 'Create a new meeting in a project.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          project_id: { type: 'number', description: 'Project ID' },
+          title:      { type: 'string', description: 'Meeting title / chủ đề' },
+          type:       { type: 'string', enum: ['Khách hàng', 'Review nội bộ'], description: 'Meeting type (default Review nội bộ)' },
+          date:       { type: 'string', description: 'Date YYYY-MM-DD (default today)' },
+          attendees:  { type: 'array', items: { type: 'string' }, description: 'Attendee names' },
+          purpose:    { type: 'string', description: 'Mục đích cuộc họp' },
+        },
+        required: ['project_id', 'title'],
+      },
+    },
+    {
+      name: 'update_meeting',
+      description: 'Update meeting fields: title, type, date, attendees, purpose (mục đích), summary (tổng kết).',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          id:        { type: 'number', description: 'Meeting ID' },
+          title:     { type: 'string' },
+          type:      { type: 'string', enum: ['Khách hàng', 'Review nội bộ'] },
+          date:      { type: 'string', description: 'YYYY-MM-DD' },
+          attendees: { type: 'array', items: { type: 'string' } },
+          purpose:   { type: 'string', description: 'Mục đích cuộc họp' },
+          summary:   { type: 'string', description: '📝 Tổng kết cuộc họp — ghi sau khi họp xong' },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'add_meeting_action',
+      description:
+        'Add a discussion point or action item to a meeting. ' +
+        'kind="discussion" (default) = nội dung thảo luận (text + proposer). ' +
+        'kind="action" = kế hoạch hành động (text + assignee_text + due).',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          meeting_id:    { type: 'number', description: 'Meeting ID' },
+          text:          { type: 'string', description: 'Nội dung ý kiến / việc cần làm' },
+          kind:          { type: 'string', enum: ['discussion', 'action'], description: 'Loại (default discussion)' },
+          proposer:      { type: 'string', description: 'Ai đề xuất (dùng khi kind=discussion)' },
+          assignee_text: { type: 'string', description: 'Người phụ trách (dùng khi kind=action, free text — có thể là đối tác)' },
+          due:           { type: 'string', description: 'Hạn YYYY-MM-DD (dùng khi kind=action)' },
+        },
+        required: ['meeting_id', 'text'],
+      },
+    },
+    {
       name: 'notifications',
       description:
         'List your notifications (assignments, mentions, comments, completions) with unread count, ' +
@@ -262,6 +436,18 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'get_item':    text = await getItem(api, args as { id: number }); break;
       case 'add_task':    text = await addTask(api, args as unknown as AddTaskArgs); break;
       case 'list_users':  text = await listUsers(api); break;
+      case 'list_projects': text = await listProjects(api, getMe(), args as unknown as ListProjectsArgs); break;
+      case 'get_project': text = await getProject(api, args as { id: number }); break;
+      case 'update_project': text = await updateProject(api, args as unknown as UpdateProjectArgs); break;
+      case 'project_health': text = await projectHealth(api, args as { id: number }); break;
+      case 'project_evm': text = await projectEvm(api, args as { id: number }); break;
+      case 'list_project_members': text = await listProjectMembers(api, args as { id: number }); break;
+      case 'list_sprints': text = await listSprints(api, args as { id: number }); break;
+      case 'list_meetings': text = await listMeetings(api, args as { id: number }); break;
+      case 'get_meeting': text = await getMeeting(api, args as { id: number }); break;
+      case 'add_meeting': text = await addMeeting(api, args as unknown as AddMeetingArgs); break;
+      case 'update_meeting': text = await updateMeeting(api, args as unknown as UpdateMeetingArgs); break;
+      case 'add_meeting_action': text = await addMeetingAction(api, args as unknown as AddMeetingActionArgs); break;
       case 'notifications': text = await notifications(api, args as unknown as NotificationsArgs); break;
       case 'log_time':    text = await logTime(api, args as unknown as LogTimeArgs); break;
       case 'comment':     text = await comment(api, args as unknown as CommentArgs); break;

@@ -192,7 +192,7 @@ var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
-    LOCAL_VERSION = true ? "1.1.2" : "dev";
+    LOCAL_VERSION = true ? "1.2.0" : "dev";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
@@ -337,6 +337,268 @@ async function listUsers(apiFn) {
   const users = await apiFn("GET", "/users");
   if (!users.length) return "_No users found._";
   return ["# Users", ...users.map((u) => `- [user:${u.id}] ${u.name} (${u.role})`)].join("\n");
+}
+async function listProjects(apiFn, me, args = {}) {
+  const { mine_only, status } = args;
+  let projs = await apiFn("GET", "/projects");
+  if (mine_only && me) projs = projs.filter((p) => p.pm === me.id);
+  if (status) projs = projs.filter((p) => p.status === status);
+  if (!projs.length) {
+    return mine_only ? "_B\u1EA1n kh\xF4ng ph\u1EA3i PM c\u1EE7a d\u1EF1 \xE1n n\xE0o._" : "_No projects found._";
+  }
+  const title = mine_only ? `# D\u1EF1 \xE1n c\u1EE7a t\xF4i (${projs.length})` : `# Projects (${projs.length})`;
+  const lines = [title, ""];
+  projs.forEach((p) => {
+    lines.push(`- **[project:${p.id}]** ${p.name}`);
+    const meta1 = [
+      p.customer ? `KH: ${p.customer}` : null,
+      `Status: ${p.status}`,
+      `Ti\u1EBFn \u0111\u1ED9: ${p.progress ?? 0}%`
+    ].filter(Boolean).join(" \xB7 ");
+    lines.push(`  ${meta1}`);
+    const meta2 = [
+      `MD: ${p.md_used ?? 0}/${p.md_budget ?? 0}`,
+      `${p.start || "\u2014"} \u2192 ${p.end || "\u2014"}`
+    ].join(" \xB7 ");
+    lines.push(`  ${meta2}`);
+  });
+  return lines.join("\n");
+}
+async function getProject(apiFn, { id }) {
+  const p = await apiFn("GET", `/projects/${id}`);
+  const blocks = p.blocks || [];
+  const featCount = blocks.reduce((n, b) => n + (b.features?.length || 0), 0);
+  const lines = [];
+  lines.push(`# D\u1EF1 \xE1n #${p.id}: ${p.name}`);
+  lines.push(`KH: ${p.customer || "\u2014"} \xB7 Status: ${p.status} \xB7 Ti\u1EBFn \u0111\u1ED9: ${p.progress ?? 0}%`);
+  lines.push(`MD: ${p.md_used}/${p.md_budget} \xB7 Start \u2192 End: ${p.start || "\u2014"} \u2192 ${p.end || "\u2014"}`);
+  if (p.warranty_start || p.warranty_end) {
+    lines.push(`B\u1EA3o h\xE0nh: ${p.warranty_start || "\u2014"} \u2192 ${p.warranty_end || "\u2014"}`);
+  }
+  if (p.vision) lines.push(`
+**Vision**: ${p.vision}`);
+  lines.push(`
+## C\u1EA5u tr\xFAc: ${blocks.length} kh\u1ED1i \xB7 ${featCount} t\xEDnh n\u0103ng \xB7 ${(p.sprints || []).length} sprint \xB7 ${(p.meetings || []).length} cu\u1ED9c h\u1ECDp`);
+  if (blocks.length) {
+    lines.push("\n### Kh\u1ED1i & T\xEDnh n\u0103ng");
+    blocks.forEach((b) => {
+      lines.push(`- [block:${b.id}] **${b.code || ""}** ${b.name} (${b.features?.length || 0} t\xEDnh n\u0103ng)`);
+      (b.features || []).slice(0, 8).forEach((f) => {
+        lines.push(`   \xB7 [feature:${f.id}] ${f.code || ""} ${f.name} \u2014 ${f.pct ?? 0}% \xB7 ${f.md} MD \xB7 ${f.priority}`);
+      });
+      if ((b.features?.length || 0) > 8) lines.push(`   \u2026 v\xE0 ${b.features.length - 8} t\xEDnh n\u0103ng n\u1EEFa`);
+    });
+  }
+  const sp = p.sprints || [];
+  if (sp.length) {
+    lines.push(`
+### Sprint (${sp.length})`);
+    sp.forEach((s) => lines.push(`- [sprint:${s.id}] ${s.name} \xB7 ${s.status || "K\u1EBF ho\u1EA1ch"} \xB7 ${s.start || "\u2014"} \u2192 ${s.end || "\u2014"}`));
+  }
+  const gates = (p.gates || []).filter((g) => g.passed);
+  if (gates.length) lines.push(`
+**Gate \u0111\xE3 qua**: ${gates.map((g) => g.code).join(" \xB7 ")}`);
+  return lines.join("\n");
+}
+async function updateProject(apiFn, args) {
+  const { id, ...rest } = args;
+  const patch = {};
+  for (const k of Object.keys(rest)) {
+    if (rest[k] !== void 0) patch[k] = rest[k];
+  }
+  if (!Object.keys(patch).length) return "Kh\xF4ng c\xF3 g\xEC \u0111\u1EC3 c\u1EADp nh\u1EADt.";
+  await apiFn("PATCH", `/projects/${id}`, patch);
+  const fields = Object.keys(patch).join(", ");
+  return `\u0110\xE3 c\u1EADp nh\u1EADt d\u1EF1 \xE1n #${id}: ${fields}`;
+}
+function computeHealth(p) {
+  const inds = [];
+  const mdPct = p.md_budget ? Math.round((p.md_used || 0) / p.md_budget * 100) : 0;
+  const actPct = p.progress || 0;
+  const dlt = actPct - mdPct;
+  const perfState = dlt >= -5 ? "ok" : dlt >= -15 ? "warn" : "bad";
+  inds.push({ label: "Ti\u1EBFn \u0111\u1ED9", val: actPct + "%", sub: "vs " + mdPct + "% MD", state: perfState, note: dlt >= 0 ? "\u0110ang v\u01B0\u1EE3t k\u1EBF ho\u1EA1ch" : dlt >= -15 ? "Ch\u1EADm nh\u1EB9" : "Ch\u1EADm \u0111\xE1ng k\u1EC3" });
+  const bdgState = mdPct <= 85 ? "ok" : mdPct <= 100 ? "warn" : "bad";
+  inds.push({ label: "Ng\xE2n s\xE1ch", val: mdPct + "%", sub: (p.md_used || 0) + "/" + p.md_budget + " MD", state: bdgState, note: mdPct <= 85 ? "C\xF2n d\u01B0 \u0111\u1ECBa" : mdPct <= 100 ? "C\u1EADn tr\u1EA7n" : "V\u01B0\u1EE3t ng\xE2n s\xE1ch" });
+  const fb = p.feedback || [];
+  const openFb = fb.filter((f) => f.status !== "\u0110\xE3 x\u1EED l\xFD" && f.status !== "\u0110\xE3 \u0111\xF3ng").length;
+  const critFb = fb.filter((f) => f.type === "L\u1ED7i" && f.status !== "\u0110\xE3 x\u1EED l\xFD" && f.status !== "\u0110\xE3 \u0111\xF3ng").length;
+  const fbState = critFb >= 3 ? "bad" : critFb >= 1 || openFb >= 5 ? "warn" : "ok";
+  inds.push({ label: "Ph\u1EA3n h\u1ED3i m\u1EDF", val: String(openFb), sub: critFb + " L\u1ED7i nghi\xEAm tr\u1ECDng", state: fbState, note: critFb >= 3 ? "Nhi\u1EC1u l\u1ED7i c\u1EA7n x\u1EED l\xFD" : critFb >= 1 ? "C\xF3 l\u1ED7i \u01B0u ti\xEAn" : "Trong t\u1EA7m ki\u1EC3m so\xE1t" });
+  const tasks = p.tasks || [];
+  const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const overdue = tasks.filter((t) => t.due && t.due < today && t.status !== "Done" && t.status !== "Close").length;
+  const needHelp = tasks.filter((t) => t.status === "Need help").length;
+  const tkState = overdue >= 5 || needHelp >= 3 ? "bad" : overdue >= 1 || needHelp >= 1 ? "warn" : "ok";
+  inds.push({ label: "Task", val: overdue + " qu\xE1 h\u1EA1n", sub: needHelp + " c\u1EA7n h\u1ED7 tr\u1EE3", state: tkState, note: overdue === 0 && needHelp === 0 ? "\u0110\xFAng ti\u1EBFn \u0111\u1ED9" : "C\u1EA7n ch\xFA \xFD" });
+  const risks = p.risks || [];
+  const high = risks.filter((r) => r.status !== "\u0110\xE3 \u0111\xF3ng" && (r.probability || 0) * (r.impact || 0) >= 16).length;
+  const med = risks.filter((r) => r.status !== "\u0110\xE3 \u0111\xF3ng" && (r.probability || 0) * (r.impact || 0) >= 9 && (r.probability || 0) * (r.impact || 0) < 16).length;
+  const rkState = high >= 2 ? "bad" : high >= 1 || med >= 3 ? "warn" : "ok";
+  inds.push({ label: "R\u1EE7i ro", val: high + " Cao", sub: med + " TB", state: rkState, note: high >= 2 ? "C\u1EA7n can thi\u1EC7p ngay" : "Trong t\u1EA7m ki\u1EC3m so\xE1t" });
+  const bads = inds.filter((x) => x.state === "bad").length;
+  const warns = inds.filter((x) => x.state === "warn").length;
+  const overall = bads >= 2 ? "bad" : bads >= 1 || warns >= 2 ? "warn" : "ok";
+  const score = Math.round(inds.filter((x) => x.state === "ok").length / inds.length * 100);
+  return { overall, score, indicators: inds };
+}
+async function projectHealth(apiFn, { id }) {
+  const p = await apiFn("GET", `/projects/${id}`);
+  const H = computeHealth(p);
+  const icons = { ok: "\u{1F7E2}", warn: "\u{1F7E1}", bad: "\u{1F534}" };
+  const label = { ok: "Kho\u1EBB m\u1EA1nh", warn: "C\u1EA7n ch\xFA \xFD", bad: "R\u1EE7i ro cao" };
+  const lines = [];
+  lines.push(`# S\u1EE9c kho\u1EBB d\u1EF1 \xE1n \u2014 ${p.name}`);
+  lines.push(`${icons[H.overall]} **${label[H.overall]}** \xB7 \u0110i\u1EC3m: **${H.score}/100**
+`);
+  lines.push("## Ch\u1EC9 s\u1ED1 chi ti\u1EBFt");
+  H.indicators.forEach((x) => {
+    lines.push(`- ${icons[x.state]} **${x.label}**: ${x.val} \xB7 ${x.sub} \u2014 ${x.note}`);
+  });
+  return lines.join("\n");
+}
+async function projectEvm(apiFn, { id }) {
+  const p = await apiFn("GET", `/projects/${id}`);
+  const BAC = p.md_budget || 0;
+  const EV = BAC * (p.progress || 0) / 100;
+  const AC = p.md_used || 0;
+  const startD = p.start ? new Date(p.start) : null;
+  const endD = p.end ? new Date(p.end) : null;
+  let pctTime = 0;
+  if (startD && endD && endD > startD) {
+    pctTime = Math.max(0, Math.min(100, (Date.now() - +startD) / (+endD - +startD) * 100));
+  }
+  const PV = BAC * pctTime / 100;
+  const CV = EV - AC, SV = EV - PV;
+  const CPI = AC > 0 ? EV / AC : null;
+  const SPI = PV > 0 ? EV / PV : null;
+  const EAC = CPI ? BAC / CPI : null;
+  const r = (n, d = 1) => Math.round(n * Math.pow(10, d)) / Math.pow(10, d);
+  const lines = [];
+  lines.push(`# EVM (Earned Value Management) \u2014 ${p.name}
+`);
+  lines.push(`**BAC** (ng\xE2n s\xE1ch t\u1ED5ng): ${BAC} MD`);
+  lines.push(`**EV**  (gi\xE1 tr\u1ECB \u0111\xE3 \u0111\u1EA1t): ${r(EV)} MD  = BAC \xD7 ${p.progress ?? 0}%`);
+  lines.push(`**AC**  (MD \u0111\xE3 d\xF9ng): ${r(AC)} MD`);
+  lines.push(`**PV**  (k\u1EBF ho\u1EA1ch theo l\u1ECBch): ${r(PV)} MD  (${r(pctTime, 0)}% th\u1EDDi gian tr\xF4i)`);
+  lines.push("");
+  lines.push(`**CPI** (Cost Performance): ${CPI ? r(CPI, 2) : "\u2014"} ${CPI && CPI < 0.9 ? "\u26A0 v\u01B0\u1EE3t ng\xE2n s\xE1ch" : ""}`);
+  lines.push(`**SPI** (Schedule Performance): ${SPI ? r(SPI, 2) : "\u2014"} ${SPI && SPI < 0.9 ? "\u26A0 ch\u1EADm ti\u1EBFn \u0111\u1ED9" : ""}`);
+  lines.push(`**CV** = EV - AC = ${CV >= 0 ? "+" : ""}${r(CV)} MD`);
+  lines.push(`**SV** = EV - PV = ${SV >= 0 ? "+" : ""}${r(SV)} MD`);
+  lines.push(`**EAC** (d\u1EF1 b\xE1o t\u1ED5ng MD): ${EAC ? r(EAC) : "\u2014"} MD`);
+  return lines.join("\n");
+}
+async function listProjectMembers(apiFn, { id }) {
+  const members = await apiFn("GET", `/projects/${id}/members`);
+  if (!members.length) return `_D\u1EF1 \xE1n #${id} ch\u01B0a c\xF3 th\xE0nh vi\xEAn._`;
+  const lines = [`# Th\xE0nh vi\xEAn d\u1EF1 \xE1n #${id} (${members.length})`, ""];
+  members.forEach((m) => {
+    lines.push(`- [user:${m.user_id}] ${m.user_name || "user #" + m.user_id} \xB7 **${m.proj_role}** \xB7 joined ${m.added_at || "\u2014"}`);
+  });
+  return lines.join("\n");
+}
+async function listSprints(apiFn, { id }) {
+  const p = await apiFn("GET", `/projects/${id}`);
+  const sp = p.sprints || [];
+  if (!sp.length) return `_D\u1EF1 \xE1n #${id} ch\u01B0a c\xF3 sprint._`;
+  const lines = [`# Sprint d\u1EF1 \xE1n #${id} (${sp.length})`, ""];
+  sp.forEach((s) => {
+    lines.push(`- [sprint:${s.id}] **${s.name}** \xB7 ${s.status || "K\u1EBF ho\u1EA1ch"} \xB7 ${s.start || "\u2014"} \u2192 ${s.end || "\u2014"}`);
+    if (s.goal) lines.push(`   M\u1EE5c ti\xEAu: ${s.goal}`);
+  });
+  return lines.join("\n");
+}
+async function listMeetings(apiFn, { id }) {
+  const meetings = await apiFn("GET", `/projects/${id}/meetings`);
+  if (!meetings.length) return `_D\u1EF1 \xE1n #${id} ch\u01B0a c\xF3 cu\u1ED9c h\u1ECDp._`;
+  const lines = [`# Cu\u1ED9c h\u1ECDp d\u1EF1 \xE1n #${id} (${meetings.length})`, ""];
+  meetings.forEach((m) => {
+    const acts = m.actions || [];
+    const disCount = acts.filter((a) => (a.kind || "discussion") === "discussion" && (a.text || "").trim()).length;
+    const actCount = acts.filter((a) => a.kind === "action" && (a.text || "").trim()).length;
+    const hasSummary = !!(m.summary && m.summary.trim());
+    const chips = [
+      disCount ? `\u{1F4AC} ${disCount} \xFD ki\u1EBFn` : "",
+      actCount ? `\u{1F4CB} ${actCount} h\xE0nh \u0111\u1ED9ng` : "",
+      hasSummary ? "\u{1F4DD} c\xF3 t\u1ED5ng k\u1EBFt" : ""
+    ].filter(Boolean).join(" \xB7 ");
+    lines.push(`- [meeting:${m.id}] **${m.title}** \xB7 ${m.type || "\u2014"} \xB7 \u{1F4C5} ${m.date || "\u2014"}${chips ? " \xB7 " + chips : ""}`);
+  });
+  return lines.join("\n");
+}
+async function getMeeting(apiFn, { id }) {
+  const projs = await apiFn("GET", "/projects");
+  for (const p of projs) {
+    const meetings = await apiFn("GET", `/projects/${p.id}/meetings`);
+    const m = meetings.find((x) => x.id === id);
+    if (m) return formatMeetingDetail(m);
+  }
+  return `_Kh\xF4ng t\xECm th\u1EA5y cu\u1ED9c h\u1ECDp #${id}._`;
+}
+function formatMeetingDetail(m) {
+  const lines = [];
+  lines.push(`# Cu\u1ED9c h\u1ECDp #${m.id}: ${m.title}`);
+  lines.push(`Lo\u1EA1i: ${m.type || "\u2014"} \xB7 Ng\xE0y: ${m.date || "\u2014"}`);
+  lines.push(`Tham d\u1EF1: ${(m.attendees || []).join(", ") || "\u2014"}`);
+  if (m.purpose) lines.push(`
+**\u{1F3AF} M\u1EE5c \u0111\xEDch**
+${m.purpose}`);
+  if (m.summary) lines.push(`
+**\u{1F4DD} T\u1ED5ng k\u1EBFt**
+${m.summary}`);
+  const acts = m.actions || [];
+  const discussions = acts.filter((a) => (a.kind || "discussion") === "discussion");
+  const actions = acts.filter((a) => a.kind === "action");
+  if (discussions.length) {
+    lines.push(`
+## \u{1F4AC} N\u1ED9i dung th\u1EA3o lu\u1EADn (${discussions.length})`);
+    discussions.forEach((a, i) => lines.push(`${i + 1}. ${a.text} \u2014 _${a.proposer || "\u1EA9n danh"}_`));
+  }
+  if (actions.length) {
+    lines.push(`
+## \u{1F4CB} K\u1EBF ho\u1EA1ch h\xE0nh \u0111\u1ED9ng (${actions.length})`);
+    actions.forEach((a, i) => {
+      const who = a.assignee_text || (a.assignee ? "user #" + a.assignee : "ch\u01B0a giao");
+      lines.push(`${i + 1}. ${a.text} \u2014 \u{1F464} ${who} \xB7 \u23F0 ${a.due || "ch\u01B0a \u0111\u1EB7t h\u1EA1n"}`);
+    });
+  }
+  return lines.join("\n");
+}
+async function addMeeting(apiFn, args) {
+  const { project_id, ...rest } = args;
+  const body = {
+    title: rest.title,
+    type: rest.type || "Review n\u1ED9i b\u1ED9",
+    date: rest.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+    attendees: rest.attendees || [],
+    purpose: rest.purpose || ""
+  };
+  const m = await apiFn("POST", `/projects/${project_id}/meetings`, body);
+  return `\u0110\xE3 t\u1EA1o cu\u1ED9c h\u1ECDp [meeting:${m.id}] "${m.title}" ng\xE0y ${m.date}. Nh\u1EADp \xFD ki\u1EBFn/t\u1ED5ng k\u1EBFt b\u1EB1ng update_meeting ho\u1EB7c add_meeting_action.`;
+}
+async function updateMeeting(apiFn, args) {
+  const { id, ...rest } = args;
+  const patch = {};
+  for (const k of Object.keys(rest)) {
+    if (rest[k] !== void 0) patch[k] = rest[k];
+  }
+  if (!Object.keys(patch).length) return "Kh\xF4ng c\xF3 g\xEC \u0111\u1EC3 c\u1EADp nh\u1EADt.";
+  await apiFn("PATCH", `/meetings/${id}`, patch);
+  return `\u0110\xE3 c\u1EADp nh\u1EADt cu\u1ED9c h\u1ECDp #${id}: ${Object.keys(patch).join(", ")}`;
+}
+async function addMeetingAction(apiFn, args) {
+  const { meeting_id, ...rest } = args;
+  const kind = rest.kind || "discussion";
+  const body = {
+    text: rest.text,
+    kind,
+    proposer: rest.proposer || null,
+    assignee_text: rest.assignee_text || null,
+    due: rest.due || null
+  };
+  const a = await apiFn("POST", `/meetings/${meeting_id}/actions`, body);
+  return `\u0110\xE3 th\xEAm ${kind === "action" ? "h\xE0nh \u0111\u1ED9ng" : "\xFD ki\u1EBFn"} #${a.id} v\xE0o cu\u1ED9c h\u1ECDp #${meeting_id}.`;
 }
 async function notifications(apiFn, args = {}) {
   const { unread_only, limit, mark_read, mark_all_read } = args;
@@ -727,6 +989,7 @@ __export(cli_exports, {
   runComment: () => runComment,
   runDashboard: () => runDashboard,
   runGetItem: () => runGetItem,
+  runListProjects: () => runListProjects,
   runListUsers: () => runListUsers,
   runLogTime: () => runLogTime,
   runNotifications: () => runNotifications,
@@ -836,6 +1099,16 @@ async function runWhoami() {
 async function runListUsers() {
   await loginFromConfig();
   const text = await listUsers(api);
+  console.log(text);
+}
+async function runListProjects(rawArgs) {
+  const { flags } = parseFlags(rawArgs);
+  await loginFromConfig();
+  const { getMe: getMe2 } = await Promise.resolve().then(() => (init_api(), api_exports));
+  const text = await listProjects(api, getMe2(), {
+    mine_only: flags.mine === "true" || flags["mine-only"] === "true",
+    status: flags.status
+  });
   console.log(text);
 }
 async function runNotifications(rawArgs) {
@@ -954,6 +1227,8 @@ Direct CLI commands (no MCP client needed):
                                       Update item status
                                       (Todo/Doing/Review/Done/Cancelled)
   viot-tasktisk list-users            List all users (id, name, role)
+  viot-tasktisk list-projects [--mine] [--status <status>]
+                                      List projects (--mine = only where I am PM)
   viot-tasktisk notifications [--unread] [--limit N]
                                       Show your notifications + unread count
   viot-tasktisk notifications read <id>
@@ -1084,6 +1359,10 @@ var commands = {
     const { runListUsers: runListUsers2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
     await runListUsers2();
   },
+  "list-projects": async (args) => {
+    const { runListProjects: runListProjects2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runListProjects2(args);
+  },
   notifications: async (args) => {
     const { runNotifications: runNotifications2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
     await runNotifications2(args);
@@ -1137,7 +1416,7 @@ try {
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.1.2" },
+  { name: "viot-tasktisk", version: "1.2.0" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -1193,6 +1472,151 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: "list_users",
       description: "List all users (id, name, role) \u2014 use to resolve a name to a user id for assignment.",
       inputSchema: { type: "object", properties: {} }
+    },
+    {
+      name: "list_projects",
+      description: "List projects with basic info: id, name, customer, status, progress %, MD used/budget, start/end. Set mine_only=true to only get projects where the logged-in user is PM.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          mine_only: { type: "boolean", description: "Only projects where I am PM (optional)" },
+          status: { type: "string", description: "Filter by status: Demo \xB7 \u0110ang ch\u1EA1y \xB7 B\u1EA3o tr\xEC \xB7 T\u1EA1m d\u1EEBng \xB7 \u0110\xF3ng \xB7 Hu\u1EF7 (optional)" }
+        }
+      }
+    },
+    {
+      name: "get_project",
+      description: "Get project detail: blocks + features (with progress %), sprints, gates passed. Use this to understand project structure before drilling into meetings/tasks/items.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "Project ID" } },
+        required: ["id"]
+      }
+    },
+    {
+      name: "update_project",
+      description: "Update project fields: name, customer, status, MD budget, start/end dates, warranty dates, PM, vision. Only fields provided are patched.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "Project ID" },
+          name: { type: "string" },
+          customer: { type: "string" },
+          customer_id: { type: "number", description: "ID from customer directory (optional)" },
+          status: { type: "string", enum: ["Demo", "\u0110ang ch\u1EA1y", "B\u1EA3o tr\xEC", "T\u1EA1m d\u1EEBng", "\u0110\xF3ng", "Hu\u1EF7"] },
+          md_budget: { type: "number", description: "ManDay budget" },
+          start: { type: "string", description: "Start date YYYY-MM-DD" },
+          end: { type: "string", description: "End date YYYY-MM-DD" },
+          warranty_start: { type: "string", description: "Warranty start YYYY-MM-DD" },
+          warranty_end: { type: "string", description: "Warranty end YYYY-MM-DD" },
+          pm: { type: "number", description: "User ID of PM" },
+          vision: { type: "string" }
+        },
+        required: ["id"]
+      }
+    },
+    {
+      name: "project_health",
+      description: "Compute RAG (Red/Amber/Green) health for a project across 5 indicators: Ti\u1EBFn \u0111\u1ED9, Ng\xE2n s\xE1ch, Ph\u1EA3n h\u1ED3i m\u1EDF, Task qu\xE1 h\u1EA1n, R\u1EE7i ro. Returns overall status + score 0-100.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "Project ID" } },
+        required: ["id"]
+      }
+    },
+    {
+      name: "project_evm",
+      description: "Compute PMBOK Earned Value Management for a project: BAC \xB7 EV \xB7 AC \xB7 PV \xB7 CPI \xB7 SPI \xB7 CV \xB7 SV \xB7 EAC. CPI/SPI < 0.9 = red flag.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "Project ID" } },
+        required: ["id"]
+      }
+    },
+    {
+      name: "list_project_members",
+      description: "List members of a project (user_id, name, project role, joined date).",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "Project ID" } },
+        required: ["id"]
+      }
+    },
+    {
+      name: "list_sprints",
+      description: "List sprints of a project (name, status, start/end, goal).",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "Project ID" } },
+        required: ["id"]
+      }
+    },
+    {
+      name: "list_meetings",
+      description: "List meetings of a project with compact summary chips: X \xFD ki\u1EBFn \xB7 Y h\xE0nh \u0111\u1ED9ng \xB7 c\xF3 t\u1ED5ng k\u1EBFt. Use get_meeting for full detail.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "Project ID" } },
+        required: ["id"]
+      }
+    },
+    {
+      name: "get_meeting",
+      description: "Get meeting detail: purpose, t\u1ED5ng k\u1EBFt, n\u1ED9i dung th\u1EA3o lu\u1EADn, k\u1EBF ho\u1EA1ch h\xE0nh \u0111\u1ED9ng (v\u1EDBi ng\u01B0\u1EDDi ph\u1EE5 tr\xE1ch + h\u1EA1n).",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "Meeting ID" } },
+        required: ["id"]
+      }
+    },
+    {
+      name: "add_meeting",
+      description: "Create a new meeting in a project.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "Project ID" },
+          title: { type: "string", description: "Meeting title / ch\u1EE7 \u0111\u1EC1" },
+          type: { type: "string", enum: ["Kh\xE1ch h\xE0ng", "Review n\u1ED9i b\u1ED9"], description: "Meeting type (default Review n\u1ED9i b\u1ED9)" },
+          date: { type: "string", description: "Date YYYY-MM-DD (default today)" },
+          attendees: { type: "array", items: { type: "string" }, description: "Attendee names" },
+          purpose: { type: "string", description: "M\u1EE5c \u0111\xEDch cu\u1ED9c h\u1ECDp" }
+        },
+        required: ["project_id", "title"]
+      }
+    },
+    {
+      name: "update_meeting",
+      description: "Update meeting fields: title, type, date, attendees, purpose (m\u1EE5c \u0111\xEDch), summary (t\u1ED5ng k\u1EBFt).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "Meeting ID" },
+          title: { type: "string" },
+          type: { type: "string", enum: ["Kh\xE1ch h\xE0ng", "Review n\u1ED9i b\u1ED9"] },
+          date: { type: "string", description: "YYYY-MM-DD" },
+          attendees: { type: "array", items: { type: "string" } },
+          purpose: { type: "string", description: "M\u1EE5c \u0111\xEDch cu\u1ED9c h\u1ECDp" },
+          summary: { type: "string", description: "\u{1F4DD} T\u1ED5ng k\u1EBFt cu\u1ED9c h\u1ECDp \u2014 ghi sau khi h\u1ECDp xong" }
+        },
+        required: ["id"]
+      }
+    },
+    {
+      name: "add_meeting_action",
+      description: 'Add a discussion point or action item to a meeting. kind="discussion" (default) = n\u1ED9i dung th\u1EA3o lu\u1EADn (text + proposer). kind="action" = k\u1EBF ho\u1EA1ch h\xE0nh \u0111\u1ED9ng (text + assignee_text + due).',
+      inputSchema: {
+        type: "object",
+        properties: {
+          meeting_id: { type: "number", description: "Meeting ID" },
+          text: { type: "string", description: "N\u1ED9i dung \xFD ki\u1EBFn / vi\u1EC7c c\u1EA7n l\xE0m" },
+          kind: { type: "string", enum: ["discussion", "action"], description: "Lo\u1EA1i (default discussion)" },
+          proposer: { type: "string", description: "Ai \u0111\u1EC1 xu\u1EA5t (d\xF9ng khi kind=discussion)" },
+          assignee_text: { type: "string", description: "Ng\u01B0\u1EDDi ph\u1EE5 tr\xE1ch (d\xF9ng khi kind=action, free text \u2014 c\xF3 th\u1EC3 l\xE0 \u0111\u1ED1i t\xE1c)" },
+          due: { type: "string", description: "H\u1EA1n YYYY-MM-DD (d\xF9ng khi kind=action)" }
+        },
+        required: ["meeting_id", "text"]
+      }
     },
     {
       name: "notifications",
@@ -1261,6 +1685,42 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         break;
       case "list_users":
         text = await listUsers(api);
+        break;
+      case "list_projects":
+        text = await listProjects(api, getMe(), args);
+        break;
+      case "get_project":
+        text = await getProject(api, args);
+        break;
+      case "update_project":
+        text = await updateProject(api, args);
+        break;
+      case "project_health":
+        text = await projectHealth(api, args);
+        break;
+      case "project_evm":
+        text = await projectEvm(api, args);
+        break;
+      case "list_project_members":
+        text = await listProjectMembers(api, args);
+        break;
+      case "list_sprints":
+        text = await listSprints(api, args);
+        break;
+      case "list_meetings":
+        text = await listMeetings(api, args);
+        break;
+      case "get_meeting":
+        text = await getMeeting(api, args);
+        break;
+      case "add_meeting":
+        text = await addMeeting(api, args);
+        break;
+      case "update_meeting":
+        text = await updateMeeting(api, args);
+        break;
+      case "add_meeting_action":
+        text = await addMeetingAction(api, args);
         break;
       case "notifications":
         text = await notifications(api, args);
