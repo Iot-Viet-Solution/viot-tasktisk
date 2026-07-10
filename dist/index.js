@@ -192,7 +192,7 @@ var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
-    LOCAL_VERSION = true ? "1.3.0" : "dev";
+    LOCAL_VERSION = true ? "1.4.0" : "dev";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
@@ -677,6 +677,28 @@ async function addSprint(apiFn, args) {
   };
   const s = await apiFn("POST", `/projects/${project_id}/sprints`, body);
   return `\u0110\xE3 t\u1EA1o sprint [sprint:${s.id}] ${s.name} trong d\u1EF1 \xE1n #${project_id}.`;
+}
+async function deleteBlock(apiFn, { id }) {
+  await apiFn("DELETE", `/blocks/${id}`);
+  return `\u0110\xE3 xo\xE1 kh\u1ED1i #${id} (k\xE8m t\xEDnh n\u0103ng v\xE0 item con).`;
+}
+async function deleteFeature(apiFn, { id }) {
+  await apiFn("DELETE", `/features/${id}`);
+  return `\u0110\xE3 xo\xE1 t\xEDnh n\u0103ng #${id} (k\xE8m item con).`;
+}
+async function addPhase(apiFn, args) {
+  const { project_id, ...rest } = args;
+  const body = {
+    name: rest.name,
+    code: rest.code || "",
+    descr: rest.descr || "",
+    plan_kickoff: rest.plan_kickoff || null,
+    plan_build_done: rest.plan_build_done || null,
+    plan_deploy_done: rest.plan_deploy_done || null,
+    plan_accept_done: rest.plan_accept_done || null
+  };
+  const p = await apiFn("POST", `/projects/${project_id}/phases`, body);
+  return `\u0110\xE3 t\u1EA1o giai \u0111o\u1EA1n [phase:${p.id}] ${p.name} trong d\u1EF1 \xE1n #${project_id}.`;
 }
 async function notifications(apiFn, args = {}) {
   const { unread_only, limit, mark_read, mark_all_read } = args;
@@ -1494,7 +1516,7 @@ try {
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.3.0" },
+  { name: "viot-tasktisk", version: "1.4.0" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -1775,6 +1797,42 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       }
     },
     {
+      name: "add_phase",
+      description: "T\u1EA1o giai \u0111o\u1EA1n (Phase) m\u1EDBi v\u1EDBi 4 m\u1ED1c k\u1EBF ho\u1EA1ch: kickoff, build_done, deploy_done, accept_done. D\xF9ng \u0111\u1EC3 config Timeline d\u1EF1 \xE1n.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "Project ID" },
+          name: { type: "string", description: 'T\xEAn giai \u0111o\u1EA1n (VD "G\u01101 \u2014 Wave 1")' },
+          code: { type: "string", description: 'M\xE3 (VD "GD1")' },
+          descr: { type: "string", description: "M\xF4 t\u1EA3" },
+          plan_kickoff: { type: "string", description: "K\u1EBF ho\u1EA1ch \u2014 Ng\xE0y KickOff YYYY-MM-DD" },
+          plan_build_done: { type: "string", description: "K\u1EBF ho\u1EA1ch \u2014 Build xong YYYY-MM-DD" },
+          plan_deploy_done: { type: "string", description: "K\u1EBF ho\u1EA1ch \u2014 Tri\u1EC3n khai xong YYYY-MM-DD" },
+          plan_accept_done: { type: "string", description: "K\u1EBF ho\u1EA1ch \u2014 Nghi\u1EC7m thu xong YYYY-MM-DD" }
+        },
+        required: ["project_id", "name"]
+      }
+    },
+    {
+      name: "delete_block",
+      description: "Xo\xE1 kh\u1ED1i. L\u01AFU \xDD: s\u1EBD xo\xE1 lu\xF4n t\u1EA5t c\u1EA3 t\xEDnh n\u0103ng v\xE0 item con thu\u1ED9c kh\u1ED1i.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "Block ID" } },
+        required: ["id"]
+      }
+    },
+    {
+      name: "delete_feature",
+      description: "Xo\xE1 t\xEDnh n\u0103ng. L\u01AFU \xDD: s\u1EBD xo\xE1 lu\xF4n t\u1EA5t c\u1EA3 item con thu\u1ED9c t\xEDnh n\u0103ng.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "Feature ID" } },
+        required: ["id"]
+      }
+    },
+    {
       name: "add_sprint",
       description: "T\u1EA1o sprint m\u1EDBi cho d\u1EF1 \xE1n.",
       inputSchema: {
@@ -1927,6 +1985,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         break;
       case "add_sprint":
         text = await addSprint(api, args);
+        break;
+      case "delete_block":
+        text = await deleteBlock(api, args);
+        break;
+      case "delete_feature":
+        text = await deleteFeature(api, args);
+        break;
+      case "add_phase":
+        text = await addPhase(api, args);
         break;
       case "notifications":
         text = await notifications(api, args);

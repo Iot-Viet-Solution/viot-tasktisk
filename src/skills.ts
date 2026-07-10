@@ -811,6 +811,42 @@ export async function addSprint(apiFn: ApiFn, args: AddSprintArgs): Promise<stri
   return `Đã tạo sprint [sprint:${s.id}] ${s.name} trong dự án #${project_id}.`;
 }
 
+export async function deleteBlock(apiFn: ApiFn, { id }: { id: number }): Promise<string> {
+  await apiFn('DELETE', `/blocks/${id}`);
+  return `Đã xoá khối #${id} (kèm tính năng và item con).`;
+}
+
+export async function deleteFeature(apiFn: ApiFn, { id }: { id: number }): Promise<string> {
+  await apiFn('DELETE', `/features/${id}`);
+  return `Đã xoá tính năng #${id} (kèm item con).`;
+}
+
+export interface AddPhaseArgs {
+  project_id: number;
+  name: string;
+  code?: string;
+  descr?: string;
+  plan_kickoff?: string;
+  plan_build_done?: string;
+  plan_deploy_done?: string;
+  plan_accept_done?: string;
+}
+
+export async function addPhase(apiFn: ApiFn, args: AddPhaseArgs): Promise<string> {
+  const { project_id, ...rest } = args;
+  const body: Record<string, unknown> = {
+    name: rest.name,
+    code: rest.code || '',
+    descr: rest.descr || '',
+    plan_kickoff: rest.plan_kickoff || null,
+    plan_build_done: rest.plan_build_done || null,
+    plan_deploy_done: rest.plan_deploy_done || null,
+    plan_accept_done: rest.plan_accept_done || null,
+  };
+  const p = await apiFn<{ id: number; name: string }>('POST', `/projects/${project_id}/phases`, body);
+  return `Đã tạo giai đoạn [phase:${p.id}] ${p.name} trong dự án #${project_id}.`;
+}
+
 export interface NotificationsArgs {
   unread_only?: boolean;
   limit?: number;

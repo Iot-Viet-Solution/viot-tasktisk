@@ -9,7 +9,7 @@ import {
   dashboard, updateWork, addTask, getItem, listUsers, listProjects,
   getProject, updateProject, projectHealth, projectEvm, listProjectMembers, listSprints,
   listMeetings, getMeeting, addMeeting, updateMeeting, addMeetingAction,
-  addBlock, updateBlock, addFeature, updateFeature, addItem, addSprint,
+  addBlock, updateBlock, addFeature, updateFeature, addItem, addSprint, deleteBlock, deleteFeature, addPhase,
   notifications, logTime, comment,
 } from './skills.js';
 import { loadConfig } from './config.js';
@@ -18,7 +18,7 @@ import { formatError } from './errors.js';
 import type {
   UpdateWorkArgs, AddTaskArgs, ListProjectsArgs,
   UpdateProjectArgs, AddMeetingArgs, UpdateMeetingArgs, AddMeetingActionArgs,
-  AddBlockArgs, UpdateBlockArgs, AddFeatureArgs, UpdateFeatureArgs, AddItemArgs, AddSprintArgs,
+  AddBlockArgs, UpdateBlockArgs, AddFeatureArgs, UpdateFeatureArgs, AddItemArgs, AddSprintArgs, AddPhaseArgs,
   NotificationsArgs, LogTimeArgs, CommentArgs,
 } from './skills.js';
 
@@ -454,6 +454,44 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'add_phase',
+      description:
+        'Tạo giai đoạn (Phase) mới với 4 mốc kế hoạch: kickoff, build_done, deploy_done, accept_done. ' +
+        'Dùng để config Timeline dự án.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          project_id:       { type: 'number', description: 'Project ID' },
+          name:             { type: 'string', description: 'Tên giai đoạn (VD "GĐ1 — Wave 1")' },
+          code:             { type: 'string', description: 'Mã (VD "GD1")' },
+          descr:            { type: 'string', description: 'Mô tả' },
+          plan_kickoff:     { type: 'string', description: 'Kế hoạch — Ngày KickOff YYYY-MM-DD' },
+          plan_build_done:  { type: 'string', description: 'Kế hoạch — Build xong YYYY-MM-DD' },
+          plan_deploy_done: { type: 'string', description: 'Kế hoạch — Triển khai xong YYYY-MM-DD' },
+          plan_accept_done: { type: 'string', description: 'Kế hoạch — Nghiệm thu xong YYYY-MM-DD' },
+        },
+        required: ['project_id', 'name'],
+      },
+    },
+    {
+      name: 'delete_block',
+      description: 'Xoá khối. LƯU Ý: sẽ xoá luôn tất cả tính năng và item con thuộc khối.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: { id: { type: 'number', description: 'Block ID' } },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'delete_feature',
+      description: 'Xoá tính năng. LƯU Ý: sẽ xoá luôn tất cả item con thuộc tính năng.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: { id: { type: 'number', description: 'Feature ID' } },
+        required: ['id'],
+      },
+    },
+    {
       name: 'add_sprint',
       description: 'Tạo sprint mới cho dự án.',
       inputSchema: {
@@ -572,6 +610,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'update_feature': text = await updateFeature(api, args as unknown as UpdateFeatureArgs); break;
       case 'add_item': text = await addItem(api, args as unknown as AddItemArgs); break;
       case 'add_sprint': text = await addSprint(api, args as unknown as AddSprintArgs); break;
+      case 'delete_block': text = await deleteBlock(api, args as { id: number }); break;
+      case 'delete_feature': text = await deleteFeature(api, args as { id: number }); break;
+      case 'add_phase': text = await addPhase(api, args as unknown as AddPhaseArgs); break;
       case 'notifications': text = await notifications(api, args as unknown as NotificationsArgs); break;
       case 'log_time':    text = await logTime(api, args as unknown as LogTimeArgs); break;
       case 'comment':     text = await comment(api, args as unknown as CommentArgs); break;
