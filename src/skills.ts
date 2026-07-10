@@ -659,6 +659,158 @@ export async function addMeetingAction(apiFn: ApiFn, args: AddMeetingActionArgs)
   return `Đã thêm ${kind === 'action' ? 'hành động' : 'ý kiến'} #${a.id} vào cuộc họp #${meeting_id}.`;
 }
 
+/* ================================================================
+ * BLOCK / FEATURE / ITEM / SPRINT — CRUD để dựng cấu trúc dự án
+ * ================================================================ */
+
+export interface AddBlockArgs {
+  project_id: number;
+  name: string;
+  code?: string;
+  descr?: string;
+  owner?: number;
+}
+
+export async function addBlock(apiFn: ApiFn, args: AddBlockArgs): Promise<string> {
+  const { project_id, name, code, descr, owner } = args;
+  const body = { name, code: code || '', descr: descr || '', owner: owner ?? null };
+  const b = await apiFn<{ id: number; name: string; code: string | null }>(
+    'POST', `/projects/${project_id}/blocks`, body
+  );
+  return `Đã tạo khối [block:${b.id}] ${b.code || ''} — ${b.name} trong dự án #${project_id}.`;
+}
+
+export interface UpdateBlockArgs {
+  id: number;
+  name?: string;
+  code?: string;
+  descr?: string;
+  owner?: number;
+}
+
+export async function updateBlock(apiFn: ApiFn, args: UpdateBlockArgs): Promise<string> {
+  const { id, ...rest } = args;
+  const patch: Record<string, unknown> = {};
+  for (const k of Object.keys(rest) as (keyof typeof rest)[]) {
+    if (rest[k] !== undefined) patch[k] = rest[k];
+  }
+  if (!Object.keys(patch).length) return 'Không có gì để cập nhật.';
+  await apiFn('PATCH', `/blocks/${id}`, patch);
+  return `Đã cập nhật khối #${id}: ${Object.keys(patch).join(', ')}`;
+}
+
+export interface AddFeatureArgs {
+  project_id: number;
+  block_id: number;
+  name: string;
+  code?: string;
+  descr?: string;
+  md?: number;
+  priority?: 'Cao' | 'TB' | 'Thấp';
+  assignee?: number;
+  start?: string;
+  end?: string;
+}
+
+export async function addFeature(apiFn: ApiFn, args: AddFeatureArgs): Promise<string> {
+  const { project_id, block_id, name, code, descr, md, priority, assignee, start, end } = args;
+  const body = {
+    block_id,
+    name,
+    code: code || '',
+    descr: descr || '',
+    md: md ?? 0,
+    priority: priority || 'TB',
+    assignee: assignee ?? null,
+    start: start || null,
+    end: end || null,
+  };
+  const f = await apiFn<{ id: number; name: string; code: string | null }>(
+    'POST', `/projects/${project_id}/features`, body
+  );
+  return `Đã tạo tính năng [feature:${f.id}] ${f.code || ''} ${f.name} trong khối #${block_id}.`;
+}
+
+export interface UpdateFeatureArgs {
+  id: number;
+  name?: string;
+  code?: string;
+  descr?: string;
+  md?: number;
+  priority?: 'Cao' | 'TB' | 'Thấp';
+  block_id?: number;
+  assignee?: number;
+  start?: string;
+  end?: string;
+  pd?: number;
+  pb?: number;
+  pv?: number;
+  pf?: number;
+  phase_weights?: string;
+}
+
+export async function updateFeature(apiFn: ApiFn, args: UpdateFeatureArgs): Promise<string> {
+  const { id, ...rest } = args;
+  const patch: Record<string, unknown> = {};
+  for (const k of Object.keys(rest) as (keyof typeof rest)[]) {
+    if (rest[k] !== undefined) patch[k] = rest[k];
+  }
+  if (!Object.keys(patch).length) return 'Không có gì để cập nhật.';
+  await apiFn('PATCH', `/features/${id}`, patch);
+  return `Đã cập nhật tính năng #${id}: ${Object.keys(patch).join(', ')}`;
+}
+
+export interface AddItemArgs {
+  feature_id: number;
+  type: 'story' | 'bug' | 'tech' | 'spike';
+  title: string;
+  description?: string;
+  priority?: 'Cao' | 'TB' | 'Thấp';
+  sprint_id?: number;
+  story_points?: number;
+  assignee?: number;
+  acceptance_criteria?: string;
+}
+
+export async function addItem(apiFn: ApiFn, args: AddItemArgs): Promise<string> {
+  const body: Record<string, unknown> = {
+    feature_id: args.feature_id,
+    type: args.type,
+    title: args.title,
+    description: args.description || '',
+    priority: args.priority || 'TB',
+    status: 'Todo',
+  };
+  if (args.sprint_id !== undefined) body.sprint_id = args.sprint_id;
+  if (args.story_points !== undefined) body.story_points = args.story_points;
+  if (args.assignee !== undefined) body.assignee = args.assignee;
+  if (args.acceptance_criteria) body.acceptance_criteria = args.acceptance_criteria;
+  const it = await apiFn<{ id: number; title: string }>('POST', '/items', body);
+  return `Đã tạo item [item:${it.id}] ${args.type}: ${it.title}`;
+}
+
+export interface AddSprintArgs {
+  project_id: number;
+  name: string;
+  goal?: string;
+  start?: string;
+  end?: string;
+  status?: string;
+}
+
+export async function addSprint(apiFn: ApiFn, args: AddSprintArgs): Promise<string> {
+  const { project_id, ...rest } = args;
+  const body = {
+    name: rest.name,
+    goal: rest.goal || '',
+    start: rest.start || null,
+    end: rest.end || null,
+    status: rest.status || 'Kế hoạch',
+  };
+  const s = await apiFn<{ id: number; name: string }>('POST', `/projects/${project_id}/sprints`, body);
+  return `Đã tạo sprint [sprint:${s.id}] ${s.name} trong dự án #${project_id}.`;
+}
+
 export interface NotificationsArgs {
   unread_only?: boolean;
   limit?: number;

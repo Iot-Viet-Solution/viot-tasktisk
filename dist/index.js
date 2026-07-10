@@ -192,7 +192,7 @@ var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
-    LOCAL_VERSION = true ? "1.2.0" : "dev";
+    LOCAL_VERSION = true ? "1.3.0" : "dev";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
@@ -599,6 +599,84 @@ async function addMeetingAction(apiFn, args) {
   };
   const a = await apiFn("POST", `/meetings/${meeting_id}/actions`, body);
   return `\u0110\xE3 th\xEAm ${kind === "action" ? "h\xE0nh \u0111\u1ED9ng" : "\xFD ki\u1EBFn"} #${a.id} v\xE0o cu\u1ED9c h\u1ECDp #${meeting_id}.`;
+}
+async function addBlock(apiFn, args) {
+  const { project_id, name, code, descr, owner } = args;
+  const body = { name, code: code || "", descr: descr || "", owner: owner ?? null };
+  const b = await apiFn(
+    "POST",
+    `/projects/${project_id}/blocks`,
+    body
+  );
+  return `\u0110\xE3 t\u1EA1o kh\u1ED1i [block:${b.id}] ${b.code || ""} \u2014 ${b.name} trong d\u1EF1 \xE1n #${project_id}.`;
+}
+async function updateBlock(apiFn, args) {
+  const { id, ...rest } = args;
+  const patch = {};
+  for (const k of Object.keys(rest)) {
+    if (rest[k] !== void 0) patch[k] = rest[k];
+  }
+  if (!Object.keys(patch).length) return "Kh\xF4ng c\xF3 g\xEC \u0111\u1EC3 c\u1EADp nh\u1EADt.";
+  await apiFn("PATCH", `/blocks/${id}`, patch);
+  return `\u0110\xE3 c\u1EADp nh\u1EADt kh\u1ED1i #${id}: ${Object.keys(patch).join(", ")}`;
+}
+async function addFeature(apiFn, args) {
+  const { project_id, block_id, name, code, descr, md, priority, assignee, start, end } = args;
+  const body = {
+    block_id,
+    name,
+    code: code || "",
+    descr: descr || "",
+    md: md ?? 0,
+    priority: priority || "TB",
+    assignee: assignee ?? null,
+    start: start || null,
+    end: end || null
+  };
+  const f = await apiFn(
+    "POST",
+    `/projects/${project_id}/features`,
+    body
+  );
+  return `\u0110\xE3 t\u1EA1o t\xEDnh n\u0103ng [feature:${f.id}] ${f.code || ""} ${f.name} trong kh\u1ED1i #${block_id}.`;
+}
+async function updateFeature(apiFn, args) {
+  const { id, ...rest } = args;
+  const patch = {};
+  for (const k of Object.keys(rest)) {
+    if (rest[k] !== void 0) patch[k] = rest[k];
+  }
+  if (!Object.keys(patch).length) return "Kh\xF4ng c\xF3 g\xEC \u0111\u1EC3 c\u1EADp nh\u1EADt.";
+  await apiFn("PATCH", `/features/${id}`, patch);
+  return `\u0110\xE3 c\u1EADp nh\u1EADt t\xEDnh n\u0103ng #${id}: ${Object.keys(patch).join(", ")}`;
+}
+async function addItem(apiFn, args) {
+  const body = {
+    feature_id: args.feature_id,
+    type: args.type,
+    title: args.title,
+    description: args.description || "",
+    priority: args.priority || "TB",
+    status: "Todo"
+  };
+  if (args.sprint_id !== void 0) body.sprint_id = args.sprint_id;
+  if (args.story_points !== void 0) body.story_points = args.story_points;
+  if (args.assignee !== void 0) body.assignee = args.assignee;
+  if (args.acceptance_criteria) body.acceptance_criteria = args.acceptance_criteria;
+  const it = await apiFn("POST", "/items", body);
+  return `\u0110\xE3 t\u1EA1o item [item:${it.id}] ${args.type}: ${it.title}`;
+}
+async function addSprint(apiFn, args) {
+  const { project_id, ...rest } = args;
+  const body = {
+    name: rest.name,
+    goal: rest.goal || "",
+    start: rest.start || null,
+    end: rest.end || null,
+    status: rest.status || "K\u1EBF ho\u1EA1ch"
+  };
+  const s = await apiFn("POST", `/projects/${project_id}/sprints`, body);
+  return `\u0110\xE3 t\u1EA1o sprint [sprint:${s.id}] ${s.name} trong d\u1EF1 \xE1n #${project_id}.`;
 }
 async function notifications(apiFn, args = {}) {
   const { unread_only, limit, mark_read, mark_all_read } = args;
@@ -1416,7 +1494,7 @@ try {
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.2.0" },
+  { name: "viot-tasktisk", version: "1.3.0" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -1603,6 +1681,116 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       }
     },
     {
+      name: "add_block",
+      description: "T\u1EA1o kh\u1ED1i (Epic) m\u1EDBi trong d\u1EF1 \xE1n. Kh\u1ED1i ch\u1EE9a nhi\u1EC1u t\xEDnh n\u0103ng li\xEAn quan.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "Project ID" },
+          name: { type: "string", description: 'T\xEAn kh\u1ED1i (VD "Qu\u1EA3n l\xFD ng\u01B0\u1EDDi d\xF9ng")' },
+          code: { type: "string", description: 'M\xE3 kh\u1ED1i (VD "M01")' },
+          descr: { type: "string", description: "M\xF4 t\u1EA3" },
+          owner: { type: "number", description: "User ID ng\u01B0\u1EDDi ch\u1ECBu tr\xE1ch nhi\u1EC7m" }
+        },
+        required: ["project_id", "name"]
+      }
+    },
+    {
+      name: "update_block",
+      description: "S\u1EEDa kh\u1ED1i: t\xEAn, code, m\xF4 t\u1EA3, owner.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "Block ID" },
+          name: { type: "string" },
+          code: { type: "string" },
+          descr: { type: "string" },
+          owner: { type: "number", description: "User ID" }
+        },
+        required: ["id"]
+      }
+    },
+    {
+      name: "add_feature",
+      description: "T\u1EA1o t\xEDnh n\u0103ng (Feature) m\u1EDBi trong 1 kh\u1ED1i. Feature l\xE0 \u0111\u01A1n v\u1ECB b\xE0n giao \u2014 c\xF3 4 pha (Design/Build/Tri\u1EC3n khai/Nghi\u1EC7m thu), ManDay \u01B0\u1EDBc l\u01B0\u1EE3ng, priority.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "Project ID" },
+          block_id: { type: "number", description: "Block ID (kh\u1ED1i cha)" },
+          name: { type: "string", description: "T\xEAn t\xEDnh n\u0103ng" },
+          code: { type: "string", description: 'M\xE3 (VD "F01")' },
+          descr: { type: "string", description: "M\xF4 t\u1EA3 chi ti\u1EBFt" },
+          md: { type: "number", description: "ManDay \u01B0\u1EDBc l\u01B0\u1EE3ng" },
+          priority: { type: "string", enum: ["Cao", "TB", "Th\u1EA5p"], description: "\u01AFu ti\xEAn (default TB)" },
+          assignee: { type: "number", description: "User ID ng\u01B0\u1EDDi ch\u1ECBu tr\xE1ch nhi\u1EC7m chung" },
+          start: { type: "string", description: "Ng\xE0y b\u1EAFt \u0111\u1EA7u YYYY-MM-DD" },
+          end: { type: "string", description: "Ng\xE0y k\u1EBFt th\xFAc YYYY-MM-DD" }
+        },
+        required: ["project_id", "block_id", "name"]
+      }
+    },
+    {
+      name: "update_feature",
+      description: 'S\u1EEDa t\xEDnh n\u0103ng: name, code, descr, md, priority, block_id, assignee, start, end, % c\xE1c pha (pd/pb/pv/pf), phase_weights (CSV "20,55,12.5,12.5" \u2014 0 = pha \u0111\xF3 kh\xF4ng \xE1p d\u1EE5ng).',
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "Feature ID" },
+          name: { type: "string" },
+          code: { type: "string" },
+          descr: { type: "string" },
+          md: { type: "number" },
+          priority: { type: "string", enum: ["Cao", "TB", "Th\u1EA5p"] },
+          block_id: { type: "number" },
+          assignee: { type: "number" },
+          start: { type: "string", description: "YYYY-MM-DD" },
+          end: { type: "string", description: "YYYY-MM-DD" },
+          pd: { type: "number", description: "% Design (0-100)" },
+          pb: { type: "number", description: "% Build (0-100)" },
+          pv: { type: "number", description: "% Tri\u1EC3n khai (0-100)" },
+          pf: { type: "number", description: "% Nghi\u1EC7m thu (0-100)" },
+          phase_weights: { type: "string", description: 'CSV weights "pd,pb,pv,pf" (VD "20,55,12.5,12.5")' }
+        },
+        required: ["id"]
+      }
+    },
+    {
+      name: "add_item",
+      description: "T\u1EA1o Item m\u1EDBi d\u01B0\u1EDBi 1 Feature. Item l\xE0 \u0111\u01A1n v\u1ECB backlog theo chu\u1EA9n Scrum: story (y\xEAu c\u1EA7u), bug (l\u1ED7i), tech (vi\u1EC7c k\u1EF9 thu\u1EADt), spike (nghi\xEAn c\u1EE9u).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          feature_id: { type: "number", description: "Feature ID (cha)" },
+          type: { type: "string", enum: ["story", "bug", "tech", "spike"] },
+          title: { type: "string", description: "Ti\xEAu \u0111\u1EC1 ng\u1EAFn g\u1ECDn" },
+          description: { type: "string", description: "M\xF4 t\u1EA3 \xB7 Persona / M\u1EE5c ti\xEAu / L\xFD do" },
+          priority: { type: "string", enum: ["Cao", "TB", "Th\u1EA5p"] },
+          sprint_id: { type: "number", description: "Sprint ID (n\u1EBFu \u0111\xE3 g\xE1n)" },
+          story_points: { type: "number", description: "Story Points" },
+          assignee: { type: "number", description: "User ID" },
+          acceptance_criteria: { type: "string", description: "Ti\xEAu ch\xED ch\u1EA5p nh\u1EADn" }
+        },
+        required: ["feature_id", "type", "title"]
+      }
+    },
+    {
+      name: "add_sprint",
+      description: "T\u1EA1o sprint m\u1EDBi cho d\u1EF1 \xE1n.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          name: { type: "string", description: 'T\xEAn sprint (VD "S1 \u2014 N\u1EC1n t\u1EA3ng")' },
+          goal: { type: "string", description: "M\u1EE5c ti\xEAu sprint" },
+          start: { type: "string", description: "YYYY-MM-DD" },
+          end: { type: "string", description: "YYYY-MM-DD" },
+          status: { type: "string", description: "K\u1EBF ho\u1EA1ch \xB7 \u0110ang ch\u1EA1y \xB7 \u0110\xE3 \u0111\xF3ng (default K\u1EBF ho\u1EA1ch)" }
+        },
+        required: ["project_id", "name"]
+      }
+    },
+    {
       name: "add_meeting_action",
       description: 'Add a discussion point or action item to a meeting. kind="discussion" (default) = n\u1ED9i dung th\u1EA3o lu\u1EADn (text + proposer). kind="action" = k\u1EBF ho\u1EA1ch h\xE0nh \u0111\u1ED9ng (text + assignee_text + due).',
       inputSchema: {
@@ -1721,6 +1909,24 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         break;
       case "add_meeting_action":
         text = await addMeetingAction(api, args);
+        break;
+      case "add_block":
+        text = await addBlock(api, args);
+        break;
+      case "update_block":
+        text = await updateBlock(api, args);
+        break;
+      case "add_feature":
+        text = await addFeature(api, args);
+        break;
+      case "update_feature":
+        text = await updateFeature(api, args);
+        break;
+      case "add_item":
+        text = await addItem(api, args);
+        break;
+      case "add_sprint":
+        text = await addSprint(api, args);
         break;
       case "notifications":
         text = await notifications(api, args);

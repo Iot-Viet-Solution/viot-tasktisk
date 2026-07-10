@@ -9,6 +9,7 @@ import {
   dashboard, updateWork, addTask, getItem, listUsers, listProjects,
   getProject, updateProject, projectHealth, projectEvm, listProjectMembers, listSprints,
   listMeetings, getMeeting, addMeeting, updateMeeting, addMeetingAction,
+  addBlock, updateBlock, addFeature, updateFeature, addItem, addSprint,
   notifications, logTime, comment,
 } from './skills.js';
 import { loadConfig } from './config.js';
@@ -17,6 +18,7 @@ import { formatError } from './errors.js';
 import type {
   UpdateWorkArgs, AddTaskArgs, ListProjectsArgs,
   UpdateProjectArgs, AddMeetingArgs, UpdateMeetingArgs, AddMeetingActionArgs,
+  AddBlockArgs, UpdateBlockArgs, AddFeatureArgs, UpdateFeatureArgs, AddItemArgs, AddSprintArgs,
   NotificationsArgs, LogTimeArgs, CommentArgs,
 } from './skills.js';
 
@@ -352,6 +354,122 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'add_block',
+      description: 'Tạo khối (Epic) mới trong dự án. Khối chứa nhiều tính năng liên quan.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          project_id: { type: 'number', description: 'Project ID' },
+          name:       { type: 'string', description: 'Tên khối (VD "Quản lý người dùng")' },
+          code:       { type: 'string', description: 'Mã khối (VD "M01")' },
+          descr:      { type: 'string', description: 'Mô tả' },
+          owner:      { type: 'number', description: 'User ID người chịu trách nhiệm' },
+        },
+        required: ['project_id', 'name'],
+      },
+    },
+    {
+      name: 'update_block',
+      description: 'Sửa khối: tên, code, mô tả, owner.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          id:    { type: 'number', description: 'Block ID' },
+          name:  { type: 'string' },
+          code:  { type: 'string' },
+          descr: { type: 'string' },
+          owner: { type: 'number', description: 'User ID' },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'add_feature',
+      description:
+        'Tạo tính năng (Feature) mới trong 1 khối. Feature là đơn vị bàn giao — có 4 pha ' +
+        '(Design/Build/Triển khai/Nghiệm thu), ManDay ước lượng, priority.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          project_id: { type: 'number', description: 'Project ID' },
+          block_id:   { type: 'number', description: 'Block ID (khối cha)' },
+          name:       { type: 'string', description: 'Tên tính năng' },
+          code:       { type: 'string', description: 'Mã (VD "F01")' },
+          descr:      { type: 'string', description: 'Mô tả chi tiết' },
+          md:         { type: 'number', description: 'ManDay ước lượng' },
+          priority:   { type: 'string', enum: ['Cao', 'TB', 'Thấp'], description: 'Ưu tiên (default TB)' },
+          assignee:   { type: 'number', description: 'User ID người chịu trách nhiệm chung' },
+          start:      { type: 'string', description: 'Ngày bắt đầu YYYY-MM-DD' },
+          end:        { type: 'string', description: 'Ngày kết thúc YYYY-MM-DD' },
+        },
+        required: ['project_id', 'block_id', 'name'],
+      },
+    },
+    {
+      name: 'update_feature',
+      description:
+        'Sửa tính năng: name, code, descr, md, priority, block_id, assignee, start, end, ' +
+        '% các pha (pd/pb/pv/pf), phase_weights (CSV "20,55,12.5,12.5" — 0 = pha đó không áp dụng).',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          id:            { type: 'number', description: 'Feature ID' },
+          name:          { type: 'string' },
+          code:          { type: 'string' },
+          descr:         { type: 'string' },
+          md:            { type: 'number' },
+          priority:      { type: 'string', enum: ['Cao', 'TB', 'Thấp'] },
+          block_id:      { type: 'number' },
+          assignee:      { type: 'number' },
+          start:         { type: 'string', description: 'YYYY-MM-DD' },
+          end:           { type: 'string', description: 'YYYY-MM-DD' },
+          pd:            { type: 'number', description: '% Design (0-100)' },
+          pb:            { type: 'number', description: '% Build (0-100)' },
+          pv:            { type: 'number', description: '% Triển khai (0-100)' },
+          pf:            { type: 'number', description: '% Nghiệm thu (0-100)' },
+          phase_weights: { type: 'string', description: 'CSV weights "pd,pb,pv,pf" (VD "20,55,12.5,12.5")' },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'add_item',
+      description:
+        'Tạo Item mới dưới 1 Feature. Item là đơn vị backlog theo chuẩn Scrum: ' +
+        'story (yêu cầu), bug (lỗi), tech (việc kỹ thuật), spike (nghiên cứu).',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          feature_id:          { type: 'number', description: 'Feature ID (cha)' },
+          type:                { type: 'string', enum: ['story', 'bug', 'tech', 'spike'] },
+          title:               { type: 'string', description: 'Tiêu đề ngắn gọn' },
+          description:         { type: 'string', description: 'Mô tả · Persona / Mục tiêu / Lý do' },
+          priority:            { type: 'string', enum: ['Cao', 'TB', 'Thấp'] },
+          sprint_id:           { type: 'number', description: 'Sprint ID (nếu đã gán)' },
+          story_points:        { type: 'number', description: 'Story Points' },
+          assignee:            { type: 'number', description: 'User ID' },
+          acceptance_criteria: { type: 'string', description: 'Tiêu chí chấp nhận' },
+        },
+        required: ['feature_id', 'type', 'title'],
+      },
+    },
+    {
+      name: 'add_sprint',
+      description: 'Tạo sprint mới cho dự án.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          project_id: { type: 'number' },
+          name:       { type: 'string', description: 'Tên sprint (VD "S1 — Nền tảng")' },
+          goal:       { type: 'string', description: 'Mục tiêu sprint' },
+          start:      { type: 'string', description: 'YYYY-MM-DD' },
+          end:        { type: 'string', description: 'YYYY-MM-DD' },
+          status:     { type: 'string', description: 'Kế hoạch · Đang chạy · Đã đóng (default Kế hoạch)' },
+        },
+        required: ['project_id', 'name'],
+      },
+    },
+    {
       name: 'add_meeting_action',
       description:
         'Add a discussion point or action item to a meeting. ' +
@@ -448,6 +566,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'add_meeting': text = await addMeeting(api, args as unknown as AddMeetingArgs); break;
       case 'update_meeting': text = await updateMeeting(api, args as unknown as UpdateMeetingArgs); break;
       case 'add_meeting_action': text = await addMeetingAction(api, args as unknown as AddMeetingActionArgs); break;
+      case 'add_block': text = await addBlock(api, args as unknown as AddBlockArgs); break;
+      case 'update_block': text = await updateBlock(api, args as unknown as UpdateBlockArgs); break;
+      case 'add_feature': text = await addFeature(api, args as unknown as AddFeatureArgs); break;
+      case 'update_feature': text = await updateFeature(api, args as unknown as UpdateFeatureArgs); break;
+      case 'add_item': text = await addItem(api, args as unknown as AddItemArgs); break;
+      case 'add_sprint': text = await addSprint(api, args as unknown as AddSprintArgs); break;
       case 'notifications': text = await notifications(api, args as unknown as NotificationsArgs); break;
       case 'log_time':    text = await logTime(api, args as unknown as LogTimeArgs); break;
       case 'comment':     text = await comment(api, args as unknown as CommentArgs); break;
