@@ -192,7 +192,7 @@ var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
-    LOCAL_VERSION = true ? "1.4.0" : "dev";
+    LOCAL_VERSION = true ? "1.4.1" : "dev";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
@@ -627,7 +627,7 @@ async function addFeature(apiFn, args) {
     name,
     code: code || "",
     descr: descr || "",
-    md: md ?? 0,
+    md: md ?? 1,
     priority: priority || "TB",
     assignee: assignee ?? null,
     start: start || null,
@@ -1516,7 +1516,7 @@ try {
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.4.0" },
+  { name: "viot-tasktisk", version: "1.4.1" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({

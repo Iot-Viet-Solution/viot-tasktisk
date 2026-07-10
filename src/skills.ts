@@ -719,7 +719,7 @@ export async function addFeature(apiFn: ApiFn, args: AddFeatureArgs): Promise<st
     name,
     code: code || '',
     descr: descr || '',
-    md: md ?? 0,
+    md: md ?? 1,
     priority: priority || 'TB',
     assignee: assignee ?? null,
     start: start || null,
