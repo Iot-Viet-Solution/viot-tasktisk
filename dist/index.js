@@ -192,7 +192,7 @@ var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
-    LOCAL_VERSION = true ? "1.4.1" : "dev";
+    LOCAL_VERSION = true ? "1.4.2" : "dev";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
@@ -224,6 +224,14 @@ function fmtTask(t) {
   if (t.item_title) parts.push(`> item:${t.item_title}`);
   if (t.due) parts.push(`due:${t.due}`);
   if (t.priority === "Cao") parts.push("[HIGH]");
+  return parts.join(" ");
+}
+function fmtItem(i) {
+  const parts = [`[item:${i.id}] ${i.title}`, `(${i.status})`];
+  if (i.feature_name) parts.push(`\xB7 feat:${i.feature_name}`);
+  if (i.sprint_name) parts.push(`sprint:${i.sprint_name}`);
+  parts.push(`${i.task_done}/${i.task_total} tasks (${i.task_pct}%)`);
+  if (i.priority === "Cao") parts.push("[HIGH]");
   return parts.join(" ");
 }
 async function dashboard(apiFn, me) {
@@ -332,6 +340,12 @@ async function getItem(apiFn, { id }) {
     lines.push("", "_No tasks yet._");
   }
   return lines.join("\n");
+}
+async function myItems(apiFn, args = {}) {
+  const qs = args.include_closed ? "?closed=1" : "";
+  const items = await apiFn("GET", `/myitems${qs}`);
+  if (!items.length) return "_No items assigned to you._";
+  return [`# My Items (${items.length})`, ...items.map(fmtItem)].join("\n");
 }
 async function listUsers(apiFn) {
   const users = await apiFn("GET", "/users");
@@ -1092,6 +1106,7 @@ __export(cli_exports, {
   runListProjects: () => runListProjects,
   runListUsers: () => runListUsers,
   runLogTime: () => runLogTime,
+  runMyItems: () => runMyItems,
   runNotifications: () => runNotifications,
   runUpdateItem: () => runUpdateItem,
   runUpdateTask: () => runUpdateTask,
@@ -1139,6 +1154,12 @@ async function runGetItem(rawArgs) {
   if (!id) die("Usage: viot-tasktisk get-item <item_id>");
   await loginFromConfig();
   const text = await getItem(api, { id });
+  console.log(text);
+}
+async function runMyItems(rawArgs) {
+  const { flags } = parseFlags(rawArgs);
+  await loginFromConfig();
+  const text = await myItems(api, { include_closed: flags["closed"] === "true" });
   console.log(text);
 }
 async function runAddTask(rawArgs) {
@@ -1314,6 +1335,7 @@ Direct CLI commands (no MCP client needed):
   viot-tasktisk dashboard             Show your personal task dashboard
   viot-tasktisk my-tasks              Alias for dashboard
   viot-tasktisk get-item <id>         Show item detail with all child tasks
+  viot-tasktisk my-items [--closed]   List items assigned to you (add --closed for Done/Cancelled too)
   viot-tasktisk add-task <item_id> <title> [options]
                                       Create a task under an item
     --due YYYY-MM-DD                  Due date
@@ -1443,6 +1465,10 @@ var commands = {
     const { runGetItem: runGetItem2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
     await runGetItem2(args);
   },
+  "my-items": async (args) => {
+    const { runMyItems: runMyItems2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runMyItems2(args);
+  },
   "add-task": async (args) => {
     const { runAddTask: runAddTask2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
     await runAddTask2(args);
@@ -1516,7 +1542,7 @@ try {
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.4.1" },
+  { name: "viot-tasktisk", version: "1.4.2" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -1566,6 +1592,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           assignee: { type: "number", description: "User ID to assign (optional)" }
         },
         required: ["item_id", "title"]
+      }
+    },
+    {
+      name: "my_items",
+      description: "List Items (not Tasks) assigned to you, with progress (tasks done/total) and status. An Item can be assigned to you even if none of its child Tasks are \u2014 use this to catch that.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          include_closed: { type: "boolean", description: "Include Done/Cancelled items (optional, default false)" }
+        }
       }
     },
     {
@@ -1925,6 +1961,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         break;
       case "get_item":
         text = await getItem(api, args);
+        break;
+      case "my_items":
+        text = await myItems(api, args);
         break;
       case "add_task":
         text = await addTask(api, args);

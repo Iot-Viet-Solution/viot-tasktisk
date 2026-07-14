@@ -4,7 +4,7 @@ set -e
 # Keep this filename's version in lockstep with package.json's "version" —
 # `viot-tasktisk update` compares that field against this same release, so a
 # stale filename here silently breaks update-detection for everyone.
-REPO="https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.1.2.tgz"
+REPO="https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.4.2.tgz"
 USER_PREFIX="$HOME/.npm-global"
 
 # ── helpers ──────────────────────────────────────────────────────────────────

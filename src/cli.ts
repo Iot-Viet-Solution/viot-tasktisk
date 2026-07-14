@@ -4,7 +4,7 @@
  */
 
 import { login, api } from './api.js';
-import { dashboard, updateWork, addTask, getItem, listUsers, listProjects, notifications, logTime, comment } from './skills.js';
+import { dashboard, updateWork, addTask, getItem, myItems, listUsers, listProjects, notifications, logTime, comment } from './skills.js';
 import type { CommentArgs } from './skills.js';
 import { loadConfig, CONFIG_PATH } from './config.js';
 
@@ -55,6 +55,13 @@ export async function runGetItem(rawArgs: string[]): Promise<void> {
   if (!id) die('Usage: viot-tasktisk get-item <item_id>');
   await loginFromConfig();
   const text = await getItem(api, { id });
+  console.log(text);
+}
+
+export async function runMyItems(rawArgs: string[]): Promise<void> {
+  const { flags } = parseFlags(rawArgs);
+  await loginFromConfig();
+  const text = await myItems(api, { include_closed: flags['closed'] === 'true' });
   console.log(text);
 }
 
@@ -245,6 +252,7 @@ Direct CLI commands (no MCP client needed):
   viot-tasktisk dashboard             Show your personal task dashboard
   viot-tasktisk my-tasks              Alias for dashboard
   viot-tasktisk get-item <id>         Show item detail with all child tasks
+  viot-tasktisk my-items [--closed]   List items assigned to you (add --closed for Done/Cancelled too)
   viot-tasktisk add-task <item_id> <title> [options]
                                       Create a task under an item
     --due YYYY-MM-DD                  Due date

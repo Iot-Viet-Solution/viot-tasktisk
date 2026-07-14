@@ -6,7 +6,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { login, api, getMe } from './api.js';
 import {
-  dashboard, updateWork, addTask, getItem, listUsers, listProjects,
+  dashboard, updateWork, addTask, getItem, myItems, listUsers, listProjects,
   getProject, updateProject, projectHealth, projectEvm, listProjectMembers, listSprints,
   listMeetings, getMeeting, addMeeting, updateMeeting, addMeetingAction,
   addBlock, updateBlock, addFeature, updateFeature, addItem, addSprint, deleteBlock, deleteFeature, addPhase,
@@ -16,7 +16,7 @@ import { loadConfig } from './config.js';
 import { startUpdateCheck } from './update.js';
 import { formatError } from './errors.js';
 import type {
-  UpdateWorkArgs, AddTaskArgs, ListProjectsArgs,
+  UpdateWorkArgs, AddTaskArgs, MyItemsArgs, ListProjectsArgs,
   UpdateProjectArgs, AddMeetingArgs, UpdateMeetingArgs, AddMeetingActionArgs,
   AddBlockArgs, UpdateBlockArgs, AddFeatureArgs, UpdateFeatureArgs, AddItemArgs, AddSprintArgs, AddPhaseArgs,
   NotificationsArgs, LogTimeArgs, CommentArgs,
@@ -75,6 +75,10 @@ const commands: Record<string, CommandFn> = {
   'get-item': async (args) => {
     const { runGetItem } = await import('./cli.js');
     await runGetItem(args);
+  },
+  'my-items': async (args) => {
+    const { runMyItems } = await import('./cli.js');
+    await runMyItems(args);
   },
   'add-task': async (args) => {
     const { runAddTask } = await import('./cli.js');
@@ -204,6 +208,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           assignee: { type: 'number', description: 'User ID to assign (optional)' },
         },
         required: ['item_id', 'title'],
+      },
+    },
+    {
+      name: 'my_items',
+      description:
+        'List Items (not Tasks) assigned to you, with progress (tasks done/total) and status. ' +
+        'An Item can be assigned to you even if none of its child Tasks are — use this to catch that.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          include_closed: { type: 'boolean', description: 'Include Done/Cancelled items (optional, default false)' },
+        },
       },
     },
     {
@@ -590,6 +606,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'dashboard':   text = await dashboard(api, getMe()); break;
       case 'update_work': text = await updateWork(api, args as unknown as UpdateWorkArgs); break;
       case 'get_item':    text = await getItem(api, args as { id: number }); break;
+      case 'my_items':    text = await myItems(api, args as unknown as MyItemsArgs); break;
       case 'add_task':    text = await addTask(api, args as unknown as AddTaskArgs); break;
       case 'list_users':  text = await listUsers(api); break;
       case 'list_projects': text = await listProjects(api, getMe(), args as unknown as ListProjectsArgs); break;

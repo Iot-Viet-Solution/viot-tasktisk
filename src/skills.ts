@@ -129,6 +129,15 @@ function fmtTask(t: TaskWithMeta): string {
   return parts.join(' ');
 }
 
+function fmtItem(i: ItemWithTasks): string {
+  const parts: string[] = [`[item:${i.id}] ${i.title}`, `(${i.status})`];
+  if (i.feature_name) parts.push(`· feat:${i.feature_name}`);
+  if (i.sprint_name) parts.push(`sprint:${i.sprint_name}`);
+  parts.push(`${i.task_done}/${i.task_total} tasks (${i.task_pct}%)`);
+  if (i.priority === 'Cao') parts.push('[HIGH]');
+  return parts.join(' ');
+}
+
 // ---- Skills ----
 
 export async function dashboard(apiFn: ApiFn, me: User | null): Promise<string> {
@@ -268,6 +277,17 @@ export async function getItem(apiFn: ApiFn, { id }: { id: number }): Promise<str
     lines.push('', '_No tasks yet._');
   }
   return lines.join('\n');
+}
+
+export interface MyItemsArgs {
+  include_closed?: boolean;
+}
+
+export async function myItems(apiFn: ApiFn, args: MyItemsArgs = {}): Promise<string> {
+  const qs = args.include_closed ? '?closed=1' : '';
+  const items = await apiFn<ItemWithTasks[]>('GET', `/myitems${qs}`);
+  if (!items.length) return '_No items assigned to you._';
+  return [`# My Items (${items.length})`, ...items.map(fmtItem)].join('\n');
 }
 
 export async function listUsers(apiFn: ApiFn): Promise<string> {
