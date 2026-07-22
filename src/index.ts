@@ -10,7 +10,7 @@ import {
   getProject, updateProject, projectHealth, projectEvm, listProjectMembers, listSprints,
   listMeetings, getMeeting, addMeeting, updateMeeting, addMeetingAction,
   addBlock, updateBlock, addFeature, updateFeature, addItem, addSprint, deleteBlock, deleteFeature, addPhase,
-  notifications, logTime, comment,
+  weekGoals, weekPriorities, notifications, logTime, comment,
 } from './skills.js';
 import { loadConfig } from './config.js';
 import { startUpdateCheck } from './update.js';
@@ -19,7 +19,7 @@ import type {
   UpdateWorkArgs, AddTaskArgs, MyItemsArgs, ListProjectsArgs,
   UpdateProjectArgs, AddMeetingArgs, UpdateMeetingArgs, AddMeetingActionArgs,
   AddBlockArgs, UpdateBlockArgs, AddFeatureArgs, UpdateFeatureArgs, AddItemArgs, AddSprintArgs, AddPhaseArgs,
-  NotificationsArgs, LogTimeArgs, CommentArgs,
+  WeekGoalsArgs, WeekPrioritiesArgs, NotificationsArgs, LogTimeArgs, CommentArgs,
 } from './skills.js';
 
 declare const __PKG_VERSION__: string;
@@ -99,6 +99,14 @@ const commands: Record<string, CommandFn> = {
   'list-projects': async (args) => {
     const { runListProjects } = await import('./cli.js');
     await runListProjects(args);
+  },
+  'week-goals': async (args) => {
+    const { runWeekGoals } = await import('./cli.js');
+    await runWeekGoals(args);
+  },
+  'week-priorities': async (args) => {
+    const { runWeekPriorities } = await import('./cli.js');
+    await runWeekPriorities(args);
   },
   notifications: async (args) => {
     const { runNotifications } = await import('./cli.js');
@@ -543,6 +551,52 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'week_goals',
+      description:
+        'Mục tiêu tuần (màn hình "Mục tiêu tuần" / #weekgoals): xem · tạo · sửa tiến độ · xoá. ' +
+        'Mỗi mục tiêu gắn với 1 dự án + 1 người + 1 tuần ISO (YYYY-Wnn) và có % hoàn thành. ' +
+        'Dùng để lập kế hoạch tuần cho bản thân hoặc giao mục tiêu cho thành viên. ' +
+        'action="list" (mặc định tuần hiện tại, week="all" để xem hết) · "add" (cần project_id + text) · ' +
+        '"update" (cần id — thường để cập nhật pct) · "delete" (cần id).',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          action:     { type: 'string', enum: ['list', 'add', 'update', 'delete'], description: 'Thao tác' },
+          id:         { type: 'number', description: 'Goal ID (bắt buộc cho update/delete)' },
+          project_id: { type: 'number', description: 'Project ID (bắt buộc cho add; lọc khi list)' },
+          user_id:    { type: 'number', description: 'User ID được giao (mặc định là chính mình khi add) — lấy id qua list_users' },
+          week:       { type: 'string', description: 'Tuần ISO "YYYY-Wnn" hoặc current · next · prev · all (all chỉ dùng cho list). Mặc định tuần hiện tại.' },
+          text:       { type: 'string', description: 'Nội dung mục tiêu (bắt buộc cho add)' },
+          pct:        { type: 'number', description: 'Tiến độ 0-100' },
+          set_by:     { type: 'string', enum: ['self', 'PM'], description: 'Ai đặt mục tiêu — tự suy ra khi add' },
+          mine_only:  { type: 'boolean', description: 'Chỉ mục tiêu của tôi (khi list)' },
+        },
+        required: ['action'],
+      },
+    },
+    {
+      name: 'week_priorities',
+      description:
+        'Ưu tiên tuần này (màn hình "Ưu tiên tuần" / #priority) — danh sách PM đăng đầu tuần để cả nhóm biết ' +
+        'việc gì quan trọng nhất. Mỗi mục có rank (1 = cao nhất), ghi chú, và phạm vi: 1 dự án (project_id), ' +
+        '1 lead chưa ký (lead_id), hoặc chung mọi dự án (bỏ trống cả hai). ' +
+        'action="list" (mặc định tuần hiện tại) · "add" · "update" (chỉ sửa được rank/note) · "delete" (cần id). ' +
+        'Khác week_goals: đây là ưu tiên cấp nhóm/dự án, còn week_goals là mục tiêu của từng người.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          action:     { type: 'string', enum: ['list', 'add', 'update', 'delete'], description: 'Thao tác' },
+          id:         { type: 'number', description: 'Priority ID (bắt buộc cho update/delete)' },
+          week:       { type: 'string', description: 'Tuần ISO "YYYY-Wnn" hoặc current · next · prev. Mặc định tuần hiện tại.' },
+          project_id: { type: 'number', description: 'Phạm vi = dự án này (khi add). Bỏ trống cả project_id lẫn lead_id = ưu tiên chung mọi dự án.' },
+          lead_id:    { type: 'number', description: 'Phạm vi = lead/cơ hội chưa ký (khi add)' },
+          rank:       { type: 'number', description: 'Mức ưu tiên, 1 = cao nhất (default 1)' },
+          note:       { type: 'string', description: 'Ghi chú / lý do ưu tiên' },
+        },
+        required: ['action'],
+      },
+    },
+    {
       name: 'notifications',
       description:
         'List your notifications (assignments, mentions, comments, completions) with unread count, ' +
@@ -630,6 +684,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'delete_block': text = await deleteBlock(api, args as { id: number }); break;
       case 'delete_feature': text = await deleteFeature(api, args as { id: number }); break;
       case 'add_phase': text = await addPhase(api, args as unknown as AddPhaseArgs); break;
+      case 'week_goals': text = await weekGoals(api, getMe(), args as unknown as WeekGoalsArgs); break;
+      case 'week_priorities': text = await weekPriorities(api, args as unknown as WeekPrioritiesArgs); break;
       case 'notifications': text = await notifications(api, args as unknown as NotificationsArgs); break;
       case 'log_time':    text = await logTime(api, args as unknown as LogTimeArgs); break;
       case 'comment':     text = await comment(api, args as unknown as CommentArgs); break;

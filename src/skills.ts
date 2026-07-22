@@ -86,8 +86,15 @@ interface WeeklyPriorityItem {
   id: number;
   rank: number;
   note: string | null;
+  project_id?: number | null;
+  lead_id?: number | null;
+  /** joined server-side: tên dự án / lead, hoặc "🌐 Chung (mọi dự án)" */
   project_name?: string;
   project_customer?: string;
+  /** joined server-side: tên người đăng */
+  set_by_name?: string;
+  is_lead?: boolean;
+  is_general?: boolean;
 }
 
 interface PrioritiesRes {
@@ -99,13 +106,35 @@ type ApiFn = <T = unknown>(method: string, path: string, body?: unknown) => Prom
 
 // ---- Helpers ----
 
-function currentWeek(): string {
-  const d = new Date();
+/** ISO week label 'YYYY-Wnn' for a date — same algorithm the qlda-viot UI uses. */
+function isoWeekOf(date: Date): string {
+  const d = new Date(date);
   d.setHours(0, 0, 0, 0);
   d.setDate(d.getDate() + 4 - (d.getDay() || 7));
   const yearStart = new Date(d.getFullYear(), 0, 1);
   const weekNo = Math.ceil(((+d - +yearStart) / 86400000 + 1) / 7);
   return `${d.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+function currentWeek(): string {
+  return isoWeekOf(new Date());
+}
+
+/** Accepts 'YYYY-Wnn' or the relative keywords current/this · next · prev/last. */
+function resolveWeek(input?: string): string {
+  const v = (input || '').trim();
+  if (!v || v === 'current' || v === 'this') return currentWeek();
+  if (v === 'next') {
+    const d = new Date(); d.setDate(d.getDate() + 7); return isoWeekOf(d);
+  }
+  if (v === 'prev' || v === 'last') {
+    const d = new Date(); d.setDate(d.getDate() - 7); return isoWeekOf(d);
+  }
+  const m = /^(\d{4})-W(\d{1,2})$/.exec(v);
+  if (!m) {
+    throw new Error(`Tuần không hợp lệ: "${input}". Dùng "YYYY-Wnn" (VD 2026-W30) hoặc current/next/prev.`);
+  }
+  return `${m[1]}-W${m[2].padStart(2, '0')}`;
 }
 
 function todayStr(): string {
@@ -865,6 +894,221 @@ export async function addPhase(apiFn: ApiFn, args: AddPhaseArgs): Promise<string
   };
   const p = await apiFn<{ id: number; name: string }>('POST', `/projects/${project_id}/phases`, body);
   return `Đã tạo giai đoạn [phase:${p.id}] ${p.name} trong dự án #${project_id}.`;
+}
+
+/* ================================================================
+ * WEEK GOALS — Mục tiêu tuần (màn hình #weekgoals)
+ * ================================================================ */
+
+interface WeeklyGoalRow {
+  id: number;
+  project_id: number;
+  user_id: number | null;
+  /** ISO 'YYYY-Wnn' */
+  week: string;
+  text: string;
+  set_by: string | null;
+  pct: number;
+  /** joined: tên người được giao */
+  who?: string;
+  /** joined: tên dự án */
+  pname?: string;
+}
+
+export interface WeekGoalsArgs {
+  action: 'list' | 'add' | 'update' | 'delete';
+  /** Goal ID — bắt buộc cho update/delete */
+  id?: number;
+  /** Project ID — bắt buộc cho add, dùng để lọc khi list */
+  project_id?: number;
+  /** User ID được giao mục tiêu — mặc định là chính mình khi add */
+  user_id?: number;
+  /** 'YYYY-Wnn' · current · next · prev · all (chỉ list) — mặc định tuần hiện tại */
+  week?: string;
+  /** Nội dung mục tiêu — bắt buộc cho add */
+  text?: string;
+  /** Tiến độ 0-100 */
+  pct?: number;
+  /** 'self' (tự đặt) hoặc 'PM' (PM giao) — tự suy ra khi add nếu không truyền */
+  set_by?: string;
+  /** Chỉ lấy mục tiêu của chính mình (list) */
+  mine_only?: boolean;
+}
+
+function fmtGoal(g: WeeklyGoalRow): string {
+  const parts = [`[goal:${g.id}] ${g.text || '(chưa có nội dung)'}`, `— ${g.pct ?? 0}%`];
+  if (g.pname) parts.push(`· proj:${g.pname}`);
+  parts.push(`· ${g.week || '—'}`);
+  if (g.set_by && g.set_by !== 'self') parts.push(`· do ${g.set_by} giao`);
+  return parts.join(' ');
+}
+
+export async function weekGoals(apiFn: ApiFn, me: User | null, args: WeekGoalsArgs): Promise<string> {
+  const { action, id, project_id, user_id, text, pct, set_by, mine_only } = args;
+
+  if (pct != null && (pct < 0 || pct > 100)) {
+    throw new Error('pct phải nằm trong khoảng 0-100.');
+  }
+
+  if (action === 'add') {
+    if (project_id == null) throw new Error('project_id là bắt buộc khi thêm mục tiêu tuần.');
+    if (!text) throw new Error('text (nội dung mục tiêu) là bắt buộc khi thêm mục tiêu tuần.');
+    const week = resolveWeek(args.week);
+    const owner = user_id ?? me?.id ?? null;
+    const body = {
+      user_id: owner,
+      week,
+      text,
+      set_by: set_by || (owner != null && owner === me?.id ? 'self' : 'PM'),
+      pct: pct ?? 0,
+    };
+    const g = await apiFn<WeeklyGoalRow>('POST', `/projects/${project_id}/goals`, body);
+    return `Đã thêm mục tiêu [goal:${g.id}] tuần ${week} cho user #${owner ?? '?'} ` +
+      `trong dự án #${project_id}: "${text}" (${body.pct}%).`;
+  }
+
+  if (action === 'update') {
+    if (id == null) throw new Error('id là bắt buộc khi sửa mục tiêu tuần.');
+    const patch: Record<string, unknown> = {};
+    if (text !== undefined) patch.text = text;
+    if (pct !== undefined) patch.pct = pct;
+    if (project_id !== undefined) patch.project_id = project_id;
+    if (user_id !== undefined) patch.user_id = user_id;
+    if (args.week !== undefined) patch.week = resolveWeek(args.week);
+    if (set_by !== undefined) patch.set_by = set_by;
+    if (!Object.keys(patch).length) return 'Không có gì để cập nhật.';
+    await apiFn('PATCH', `/goals/${id}`, patch);
+    return `Đã cập nhật mục tiêu #${id}: ${Object.keys(patch).join(', ')}`;
+  }
+
+  if (action === 'delete') {
+    if (id == null) throw new Error('id là bắt buộc khi xoá mục tiêu tuần.');
+    await apiFn('DELETE', `/goals/${id}`);
+    return `Đã xoá mục tiêu tuần #${id}.`;
+  }
+
+  // ---- list ----
+  const all = await apiFn<WeeklyGoalRow[]>('GET', '/goals');
+  const wantAll = (args.week || '').trim() === 'all';
+  const week = wantAll ? null : resolveWeek(args.week);
+
+  let goals = all;
+  if (week) goals = goals.filter(g => g.week === week);
+  if (project_id != null) goals = goals.filter(g => g.project_id === project_id);
+  if (user_id != null) goals = goals.filter(g => g.user_id === user_id);
+  else if (mine_only && me) goals = goals.filter(g => g.user_id === me.id);
+
+  const scope = week ? `tuần ${week}` : 'tất cả các tuần';
+  if (!goals.length) return `_Chưa có mục tiêu nào cho ${scope}._`;
+
+  const byWho = new Map<string, WeeklyGoalRow[]>();
+  goals.forEach(g => {
+    const k = g.who || (g.user_id != null ? `user #${g.user_id}` : '(chưa giao)');
+    const list = byWho.get(k);
+    if (list) list.push(g); else byWho.set(k, [g]);
+  });
+
+  const avg = Math.round(goals.reduce((s, g) => s + (g.pct || 0), 0) / goals.length);
+  const done = goals.filter(g => (g.pct || 0) >= 100).length;
+  const lines: string[] = [
+    `# 🎯 Mục tiêu tuần — ${scope}`,
+    `${goals.length} mục tiêu · ${byWho.size} người · TB ${avg}% · ${done} đạt 100%`,
+    '',
+  ];
+  for (const [who, items] of byWho) {
+    const wAvg = Math.round(items.reduce((s, g) => s + (g.pct || 0), 0) / items.length);
+    lines.push(`## ${who} — ${wAvg}%`);
+    items.forEach(g => lines.push('- ' + fmtGoal(g)));
+    lines.push('');
+  }
+  return lines.join('\n').trimEnd();
+}
+
+/* ================================================================
+ * WEEK PRIORITIES — Ưu tiên tuần này (màn hình #priority)
+ * ================================================================ */
+
+export interface WeekPrioritiesArgs {
+  action: 'list' | 'add' | 'update' | 'delete';
+  /** Priority ID — bắt buộc cho update/delete */
+  id?: number;
+  /** 'YYYY-Wnn' · current · next · prev — mặc định tuần hiện tại */
+  week?: string;
+  /** Phạm vi = 1 dự án. Bỏ trống cả project_id lẫn lead_id = ưu tiên chung mọi dự án. */
+  project_id?: number;
+  /** Phạm vi = 1 lead (cơ hội chưa ký hợp đồng) */
+  lead_id?: number;
+  /** 1 = cao nhất */
+  rank?: number;
+  /** Ghi chú / lý do ưu tiên */
+  note?: string;
+}
+
+function fmtPriority(p: WeeklyPriorityItem): string {
+  const scope = p.project_name || (p.is_general ? '🌐 Chung (mọi dự án)' : '—');
+  const parts = [`${p.rank}. [prio:${p.id}] **${scope}**`];
+  if (p.is_lead) parts.push('_(lead — chưa ký)_');
+  if (p.project_customer) parts.push(`· KH: ${p.project_customer}`);
+  if (p.set_by_name) parts.push(`· đăng bởi ${p.set_by_name}`);
+  const head = parts.join(' ');
+  return p.note ? `${head}\n   ${p.note.replace(/\n/g, '\n   ')}` : head;
+}
+
+export async function weekPriorities(apiFn: ApiFn, args: WeekPrioritiesArgs): Promise<string> {
+  const { action, id, project_id, lead_id, rank, note } = args;
+
+  if (rank != null && rank < 1) throw new Error('rank phải >= 1 (1 = ưu tiên cao nhất).');
+  if (project_id != null && lead_id != null) {
+    throw new Error('Chỉ được chọn một phạm vi: project_id HOẶC lead_id (bỏ trống cả hai = ưu tiên chung).');
+  }
+
+  if (action === 'add') {
+    const week = resolveWeek(args.week);
+    const body: Record<string, unknown> = { week, rank: rank ?? 1, note: note || '' };
+    if (project_id != null) body.project_id = project_id;
+    if (lead_id != null) body.lead_id = lead_id;
+    const p = await apiFn<{ id: number }>('POST', '/priorities', body);
+    const scope = project_id != null ? `dự án #${project_id}`
+      : lead_id != null ? `lead #${lead_id}`
+      : 'chung (mọi dự án)';
+    return `Đã đăng ưu tiên [prio:${p.id}] #${body.rank} tuần ${week} — phạm vi ${scope}` +
+      (note ? `: "${note}"` : '.');
+  }
+
+  if (action === 'update') {
+    if (id == null) throw new Error('id là bắt buộc khi sửa ưu tiên tuần.');
+    // Server chỉ patch rank + note (priorityService.update). Đổi tuần/phạm vi phải xoá rồi tạo lại.
+    if (args.week !== undefined || project_id !== undefined || lead_id !== undefined) {
+      throw new Error(
+        'Chỉ sửa được rank và note. Muốn đổi tuần hoặc phạm vi (dự án/lead) thì xoá ưu tiên này rồi thêm lại.'
+      );
+    }
+    const patch: Record<string, unknown> = {};
+    if (rank !== undefined) patch.rank = rank;
+    if (note !== undefined) patch.note = note;
+    if (!Object.keys(patch).length) return 'Không có gì để cập nhật.';
+    await apiFn('PATCH', `/priorities/${id}`, patch);
+    return `Đã cập nhật ưu tiên #${id}: ${Object.keys(patch).join(', ')}`;
+  }
+
+  if (action === 'delete') {
+    if (id == null) throw new Error('id là bắt buộc khi xoá ưu tiên tuần.');
+    await apiFn('DELETE', `/priorities/${id}`);
+    return `Đã bỏ ưu tiên tuần #${id}.`;
+  }
+
+  // ---- list ----
+  const week = resolveWeek(args.week);
+  const res = await apiFn<PrioritiesRes>('GET', `/priorities?week=${week}`);
+  const items = [...(res.items ?? [])].sort((a, b) => a.rank - b.rank || a.id - b.id);
+  if (!items.length) {
+    return `_Chưa có ưu tiên nào cho tuần ${res.week || week}. PM nên đăng danh sách này đầu tuần._`;
+  }
+  return [
+    `# ⭐ Ưu tiên tuần — ${res.week || week} (${items.length})`,
+    '',
+    ...items.map(fmtPriority),
+  ].join('\n');
 }
 
 export interface NotificationsArgs {

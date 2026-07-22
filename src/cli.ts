@@ -4,7 +4,7 @@
  */
 
 import { login, api } from './api.js';
-import { dashboard, updateWork, addTask, getItem, myItems, listUsers, listProjects, notifications, logTime, comment } from './skills.js';
+import { dashboard, updateWork, addTask, getItem, myItems, listUsers, listProjects, weekGoals, weekPriorities, notifications, logTime, comment } from './skills.js';
 import type { CommentArgs } from './skills.js';
 import { loadConfig, CONFIG_PATH } from './config.js';
 
@@ -143,6 +143,111 @@ export async function runListProjects(rawArgs: string[]): Promise<void> {
   console.log(text);
 }
 
+export async function runWeekGoals(rawArgs: string[]): Promise<void> {
+  const { positional, flags } = parseFlags(rawArgs);
+  const [sub, ...rest] = positional;
+  await loginFromConfig();
+  const { getMe } = await import('./api.js');
+  const me = getMe();
+  const pct = flags['pct'] !== undefined ? Number(flags['pct']) : undefined;
+  let text: string;
+  switch (sub || 'list') {
+    case 'list':
+      text = await weekGoals(api, me, {
+        action: 'list',
+        week: flags['week'],
+        project_id: flags['project'] ? Number(flags['project']) : undefined,
+        user_id: flags['user'] ? Number(flags['user']) : undefined,
+        mine_only: flags['mine'] === 'true',
+      });
+      break;
+    case 'add': {
+      const projectId = Number(rest[0]);
+      const body = rest.slice(1).join(' ') || flags['text'];
+      if (!projectId || !body) {
+        die('Usage: viot-tasktisk week-goals add <project_id> <text> [--week YYYY-Wnn|current|next|prev] [--user <user_id>] [--pct N]');
+      }
+      text = await weekGoals(api, me, {
+        action: 'add',
+        project_id: projectId,
+        text: body,
+        week: flags['week'],
+        user_id: flags['user'] ? Number(flags['user']) : undefined,
+        pct,
+      });
+      break;
+    }
+    case 'update': {
+      const id = Number(rest[0]);
+      const body = rest.slice(1).join(' ') || flags['text'];
+      if (!id) die('Usage: viot-tasktisk week-goals update <goal_id> [<text>] [--pct N] [--week ..] [--user <user_id>]');
+      text = await weekGoals(api, me, {
+        action: 'update',
+        id,
+        text: body || undefined,
+        pct,
+        week: flags['week'],
+        user_id: flags['user'] ? Number(flags['user']) : undefined,
+      });
+      break;
+    }
+    case 'delete': {
+      const id = Number(rest[0]);
+      if (!id) die('Usage: viot-tasktisk week-goals delete <goal_id>');
+      text = await weekGoals(api, me, { action: 'delete', id });
+      break;
+    }
+    default:
+      die('Usage: viot-tasktisk week-goals <list|add|update|delete> ...');
+  }
+  console.log(text);
+}
+
+export async function runWeekPriorities(rawArgs: string[]): Promise<void> {
+  const { positional, flags } = parseFlags(rawArgs);
+  const [sub, ...rest] = positional;
+  await loginFromConfig();
+  const rank = flags['rank'] !== undefined ? Number(flags['rank']) : undefined;
+  let text: string;
+  switch (sub || 'list') {
+    case 'list':
+      text = await weekPriorities(api, { action: 'list', week: flags['week'] });
+      break;
+    case 'add': {
+      const body = rest.join(' ') || flags['note'];
+      if (!body && !flags['project'] && !flags['lead']) {
+        die('Usage: viot-tasktisk week-priorities add <note> [--rank N] [--week ..] [--project <id> | --lead <id>]\n' +
+            '       (no --project/--lead = ưu tiên chung, áp dụng mọi dự án)');
+      }
+      text = await weekPriorities(api, {
+        action: 'add',
+        note: body,
+        rank,
+        week: flags['week'],
+        project_id: flags['project'] ? Number(flags['project']) : undefined,
+        lead_id: flags['lead'] ? Number(flags['lead']) : undefined,
+      });
+      break;
+    }
+    case 'update': {
+      const id = Number(rest[0]);
+      const body = rest.slice(1).join(' ') || flags['note'];
+      if (!id) die('Usage: viot-tasktisk week-priorities update <priority_id> [<note>] [--rank N]');
+      text = await weekPriorities(api, { action: 'update', id, note: body || undefined, rank });
+      break;
+    }
+    case 'delete': {
+      const id = Number(rest[0]);
+      if (!id) die('Usage: viot-tasktisk week-priorities delete <priority_id>');
+      text = await weekPriorities(api, { action: 'delete', id });
+      break;
+    }
+    default:
+      die('Usage: viot-tasktisk week-priorities <list|add|update|delete> ...');
+  }
+  console.log(text);
+}
+
 export async function runNotifications(rawArgs: string[]): Promise<void> {
   const { positional, flags } = parseFlags(rawArgs);
   await loginFromConfig();
@@ -268,6 +373,22 @@ Direct CLI commands (no MCP client needed):
   viot-tasktisk list-users            List all users (id, name, role)
   viot-tasktisk list-projects [--mine] [--status <status>]
                                       List projects (--mine = only where I am PM)
+  viot-tasktisk week-goals [list] [--week YYYY-Wnn|current|next|prev|all] [--mine] [--project <id>] [--user <id>]
+                                      Show weekly goals (Mục tiêu tuần), grouped by person
+  viot-tasktisk week-goals add <project_id> <text> [--week ..] [--user <id>] [--pct N]
+                                      Create a weekly goal (defaults: current week, yourself)
+  viot-tasktisk week-goals update <goal_id> [<text>] [--pct N] [--week ..] [--user <id>]
+                                      Edit a weekly goal / update its % progress
+  viot-tasktisk week-goals delete <goal_id>
+                                      Delete a weekly goal
+  viot-tasktisk week-priorities [list] [--week YYYY-Wnn|current|next|prev]
+                                      Show the PM's weekly priority list (Ưu tiên tuần)
+  viot-tasktisk week-priorities add <note> [--rank N] [--week ..] [--project <id> | --lead <id>]
+                                      Post a priority (no --project/--lead = chung, mọi dự án)
+  viot-tasktisk week-priorities update <priority_id> [<note>] [--rank N]
+                                      Edit a priority's rank / note (scope + week are fixed)
+  viot-tasktisk week-priorities delete <priority_id>
+                                      Remove a priority
   viot-tasktisk notifications [--unread] [--limit N]
                                       Show your notifications + unread count
   viot-tasktisk notifications read <id>

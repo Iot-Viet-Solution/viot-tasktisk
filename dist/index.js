@@ -192,7 +192,7 @@ var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
-    LOCAL_VERSION = true ? "1.4.2" : "dev";
+    LOCAL_VERSION = true ? "1.5.0" : "dev";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
@@ -200,13 +200,35 @@ var init_update = __esm({
 });
 
 // src/skills.ts
-function currentWeek() {
-  const d = /* @__PURE__ */ new Date();
+function isoWeekOf(date) {
+  const d = new Date(date);
   d.setHours(0, 0, 0, 0);
   d.setDate(d.getDate() + 4 - (d.getDay() || 7));
   const yearStart = new Date(d.getFullYear(), 0, 1);
   const weekNo = Math.ceil(((+d - +yearStart) / 864e5 + 1) / 7);
   return `${d.getFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+}
+function currentWeek() {
+  return isoWeekOf(/* @__PURE__ */ new Date());
+}
+function resolveWeek(input) {
+  const v = (input || "").trim();
+  if (!v || v === "current" || v === "this") return currentWeek();
+  if (v === "next") {
+    const d = /* @__PURE__ */ new Date();
+    d.setDate(d.getDate() + 7);
+    return isoWeekOf(d);
+  }
+  if (v === "prev" || v === "last") {
+    const d = /* @__PURE__ */ new Date();
+    d.setDate(d.getDate() - 7);
+    return isoWeekOf(d);
+  }
+  const m = /^(\d{4})-W(\d{1,2})$/.exec(v);
+  if (!m) {
+    throw new Error(`Tu\u1EA7n kh\xF4ng h\u1EE3p l\u1EC7: "${input}". D\xF9ng "YYYY-Wnn" (VD 2026-W30) ho\u1EB7c current/next/prev.`);
+  }
+  return `${m[1]}-W${m[2].padStart(2, "0")}`;
 }
 function todayStr() {
   return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
@@ -714,6 +736,139 @@ async function addPhase(apiFn, args) {
   const p = await apiFn("POST", `/projects/${project_id}/phases`, body);
   return `\u0110\xE3 t\u1EA1o giai \u0111o\u1EA1n [phase:${p.id}] ${p.name} trong d\u1EF1 \xE1n #${project_id}.`;
 }
+function fmtGoal(g) {
+  const parts = [`[goal:${g.id}] ${g.text || "(ch\u01B0a c\xF3 n\u1ED9i dung)"}`, `\u2014 ${g.pct ?? 0}%`];
+  if (g.pname) parts.push(`\xB7 proj:${g.pname}`);
+  parts.push(`\xB7 ${g.week || "\u2014"}`);
+  if (g.set_by && g.set_by !== "self") parts.push(`\xB7 do ${g.set_by} giao`);
+  return parts.join(" ");
+}
+async function weekGoals(apiFn, me, args) {
+  const { action, id, project_id, user_id, text, pct, set_by, mine_only } = args;
+  if (pct != null && (pct < 0 || pct > 100)) {
+    throw new Error("pct ph\u1EA3i n\u1EB1m trong kho\u1EA3ng 0-100.");
+  }
+  if (action === "add") {
+    if (project_id == null) throw new Error("project_id l\xE0 b\u1EAFt bu\u1ED9c khi th\xEAm m\u1EE5c ti\xEAu tu\u1EA7n.");
+    if (!text) throw new Error("text (n\u1ED9i dung m\u1EE5c ti\xEAu) l\xE0 b\u1EAFt bu\u1ED9c khi th\xEAm m\u1EE5c ti\xEAu tu\u1EA7n.");
+    const week2 = resolveWeek(args.week);
+    const owner = user_id ?? me?.id ?? null;
+    const body = {
+      user_id: owner,
+      week: week2,
+      text,
+      set_by: set_by || (owner != null && owner === me?.id ? "self" : "PM"),
+      pct: pct ?? 0
+    };
+    const g = await apiFn("POST", `/projects/${project_id}/goals`, body);
+    return `\u0110\xE3 th\xEAm m\u1EE5c ti\xEAu [goal:${g.id}] tu\u1EA7n ${week2} cho user #${owner ?? "?"} trong d\u1EF1 \xE1n #${project_id}: "${text}" (${body.pct}%).`;
+  }
+  if (action === "update") {
+    if (id == null) throw new Error("id l\xE0 b\u1EAFt bu\u1ED9c khi s\u1EEDa m\u1EE5c ti\xEAu tu\u1EA7n.");
+    const patch = {};
+    if (text !== void 0) patch.text = text;
+    if (pct !== void 0) patch.pct = pct;
+    if (project_id !== void 0) patch.project_id = project_id;
+    if (user_id !== void 0) patch.user_id = user_id;
+    if (args.week !== void 0) patch.week = resolveWeek(args.week);
+    if (set_by !== void 0) patch.set_by = set_by;
+    if (!Object.keys(patch).length) return "Kh\xF4ng c\xF3 g\xEC \u0111\u1EC3 c\u1EADp nh\u1EADt.";
+    await apiFn("PATCH", `/goals/${id}`, patch);
+    return `\u0110\xE3 c\u1EADp nh\u1EADt m\u1EE5c ti\xEAu #${id}: ${Object.keys(patch).join(", ")}`;
+  }
+  if (action === "delete") {
+    if (id == null) throw new Error("id l\xE0 b\u1EAFt bu\u1ED9c khi xo\xE1 m\u1EE5c ti\xEAu tu\u1EA7n.");
+    await apiFn("DELETE", `/goals/${id}`);
+    return `\u0110\xE3 xo\xE1 m\u1EE5c ti\xEAu tu\u1EA7n #${id}.`;
+  }
+  const all = await apiFn("GET", "/goals");
+  const wantAll = (args.week || "").trim() === "all";
+  const week = wantAll ? null : resolveWeek(args.week);
+  let goals = all;
+  if (week) goals = goals.filter((g) => g.week === week);
+  if (project_id != null) goals = goals.filter((g) => g.project_id === project_id);
+  if (user_id != null) goals = goals.filter((g) => g.user_id === user_id);
+  else if (mine_only && me) goals = goals.filter((g) => g.user_id === me.id);
+  const scope = week ? `tu\u1EA7n ${week}` : "t\u1EA5t c\u1EA3 c\xE1c tu\u1EA7n";
+  if (!goals.length) return `_Ch\u01B0a c\xF3 m\u1EE5c ti\xEAu n\xE0o cho ${scope}._`;
+  const byWho = /* @__PURE__ */ new Map();
+  goals.forEach((g) => {
+    const k = g.who || (g.user_id != null ? `user #${g.user_id}` : "(ch\u01B0a giao)");
+    const list = byWho.get(k);
+    if (list) list.push(g);
+    else byWho.set(k, [g]);
+  });
+  const avg = Math.round(goals.reduce((s, g) => s + (g.pct || 0), 0) / goals.length);
+  const done = goals.filter((g) => (g.pct || 0) >= 100).length;
+  const lines = [
+    `# \u{1F3AF} M\u1EE5c ti\xEAu tu\u1EA7n \u2014 ${scope}`,
+    `${goals.length} m\u1EE5c ti\xEAu \xB7 ${byWho.size} ng\u01B0\u1EDDi \xB7 TB ${avg}% \xB7 ${done} \u0111\u1EA1t 100%`,
+    ""
+  ];
+  for (const [who, items] of byWho) {
+    const wAvg = Math.round(items.reduce((s, g) => s + (g.pct || 0), 0) / items.length);
+    lines.push(`## ${who} \u2014 ${wAvg}%`);
+    items.forEach((g) => lines.push("- " + fmtGoal(g)));
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd();
+}
+function fmtPriority(p) {
+  const scope = p.project_name || (p.is_general ? "\u{1F310} Chung (m\u1ECDi d\u1EF1 \xE1n)" : "\u2014");
+  const parts = [`${p.rank}. [prio:${p.id}] **${scope}**`];
+  if (p.is_lead) parts.push("_(lead \u2014 ch\u01B0a k\xFD)_");
+  if (p.project_customer) parts.push(`\xB7 KH: ${p.project_customer}`);
+  if (p.set_by_name) parts.push(`\xB7 \u0111\u0103ng b\u1EDFi ${p.set_by_name}`);
+  const head = parts.join(" ");
+  return p.note ? `${head}
+   ${p.note.replace(/\n/g, "\n   ")}` : head;
+}
+async function weekPriorities(apiFn, args) {
+  const { action, id, project_id, lead_id, rank, note } = args;
+  if (rank != null && rank < 1) throw new Error("rank ph\u1EA3i >= 1 (1 = \u01B0u ti\xEAn cao nh\u1EA5t).");
+  if (project_id != null && lead_id != null) {
+    throw new Error("Ch\u1EC9 \u0111\u01B0\u1EE3c ch\u1ECDn m\u1ED9t ph\u1EA1m vi: project_id HO\u1EB6C lead_id (b\u1ECF tr\u1ED1ng c\u1EA3 hai = \u01B0u ti\xEAn chung).");
+  }
+  if (action === "add") {
+    const week2 = resolveWeek(args.week);
+    const body = { week: week2, rank: rank ?? 1, note: note || "" };
+    if (project_id != null) body.project_id = project_id;
+    if (lead_id != null) body.lead_id = lead_id;
+    const p = await apiFn("POST", "/priorities", body);
+    const scope = project_id != null ? `d\u1EF1 \xE1n #${project_id}` : lead_id != null ? `lead #${lead_id}` : "chung (m\u1ECDi d\u1EF1 \xE1n)";
+    return `\u0110\xE3 \u0111\u0103ng \u01B0u ti\xEAn [prio:${p.id}] #${body.rank} tu\u1EA7n ${week2} \u2014 ph\u1EA1m vi ${scope}` + (note ? `: "${note}"` : ".");
+  }
+  if (action === "update") {
+    if (id == null) throw new Error("id l\xE0 b\u1EAFt bu\u1ED9c khi s\u1EEDa \u01B0u ti\xEAn tu\u1EA7n.");
+    if (args.week !== void 0 || project_id !== void 0 || lead_id !== void 0) {
+      throw new Error(
+        "Ch\u1EC9 s\u1EEDa \u0111\u01B0\u1EE3c rank v\xE0 note. Mu\u1ED1n \u0111\u1ED5i tu\u1EA7n ho\u1EB7c ph\u1EA1m vi (d\u1EF1 \xE1n/lead) th\xEC xo\xE1 \u01B0u ti\xEAn n\xE0y r\u1ED3i th\xEAm l\u1EA1i."
+      );
+    }
+    const patch = {};
+    if (rank !== void 0) patch.rank = rank;
+    if (note !== void 0) patch.note = note;
+    if (!Object.keys(patch).length) return "Kh\xF4ng c\xF3 g\xEC \u0111\u1EC3 c\u1EADp nh\u1EADt.";
+    await apiFn("PATCH", `/priorities/${id}`, patch);
+    return `\u0110\xE3 c\u1EADp nh\u1EADt \u01B0u ti\xEAn #${id}: ${Object.keys(patch).join(", ")}`;
+  }
+  if (action === "delete") {
+    if (id == null) throw new Error("id l\xE0 b\u1EAFt bu\u1ED9c khi xo\xE1 \u01B0u ti\xEAn tu\u1EA7n.");
+    await apiFn("DELETE", `/priorities/${id}`);
+    return `\u0110\xE3 b\u1ECF \u01B0u ti\xEAn tu\u1EA7n #${id}.`;
+  }
+  const week = resolveWeek(args.week);
+  const res = await apiFn("GET", `/priorities?week=${week}`);
+  const items = [...res.items ?? []].sort((a, b) => a.rank - b.rank || a.id - b.id);
+  if (!items.length) {
+    return `_Ch\u01B0a c\xF3 \u01B0u ti\xEAn n\xE0o cho tu\u1EA7n ${res.week || week}. PM n\xEAn \u0111\u0103ng danh s\xE1ch n\xE0y \u0111\u1EA7u tu\u1EA7n._`;
+  }
+  return [
+    `# \u2B50 \u01AFu ti\xEAn tu\u1EA7n \u2014 ${res.week || week} (${items.length})`,
+    "",
+    ...items.map(fmtPriority)
+  ].join("\n");
+}
 async function notifications(apiFn, args = {}) {
   const { unread_only, limit, mark_read, mark_all_read } = args;
   if (mark_all_read) {
@@ -1110,6 +1265,8 @@ __export(cli_exports, {
   runNotifications: () => runNotifications,
   runUpdateItem: () => runUpdateItem,
   runUpdateTask: () => runUpdateTask,
+  runWeekGoals: () => runWeekGoals,
+  runWeekPriorities: () => runWeekPriorities,
   runWhoami: () => runWhoami
 });
 function die(msg, code = 1) {
@@ -1232,6 +1389,108 @@ async function runListProjects(rawArgs) {
   });
   console.log(text);
 }
+async function runWeekGoals(rawArgs) {
+  const { positional, flags } = parseFlags(rawArgs);
+  const [sub, ...rest] = positional;
+  await loginFromConfig();
+  const { getMe: getMe2 } = await Promise.resolve().then(() => (init_api(), api_exports));
+  const me = getMe2();
+  const pct = flags["pct"] !== void 0 ? Number(flags["pct"]) : void 0;
+  let text;
+  switch (sub || "list") {
+    case "list":
+      text = await weekGoals(api, me, {
+        action: "list",
+        week: flags["week"],
+        project_id: flags["project"] ? Number(flags["project"]) : void 0,
+        user_id: flags["user"] ? Number(flags["user"]) : void 0,
+        mine_only: flags["mine"] === "true"
+      });
+      break;
+    case "add": {
+      const projectId = Number(rest[0]);
+      const body = rest.slice(1).join(" ") || flags["text"];
+      if (!projectId || !body) {
+        die("Usage: viot-tasktisk week-goals add <project_id> <text> [--week YYYY-Wnn|current|next|prev] [--user <user_id>] [--pct N]");
+      }
+      text = await weekGoals(api, me, {
+        action: "add",
+        project_id: projectId,
+        text: body,
+        week: flags["week"],
+        user_id: flags["user"] ? Number(flags["user"]) : void 0,
+        pct
+      });
+      break;
+    }
+    case "update": {
+      const id = Number(rest[0]);
+      const body = rest.slice(1).join(" ") || flags["text"];
+      if (!id) die("Usage: viot-tasktisk week-goals update <goal_id> [<text>] [--pct N] [--week ..] [--user <user_id>]");
+      text = await weekGoals(api, me, {
+        action: "update",
+        id,
+        text: body || void 0,
+        pct,
+        week: flags["week"],
+        user_id: flags["user"] ? Number(flags["user"]) : void 0
+      });
+      break;
+    }
+    case "delete": {
+      const id = Number(rest[0]);
+      if (!id) die("Usage: viot-tasktisk week-goals delete <goal_id>");
+      text = await weekGoals(api, me, { action: "delete", id });
+      break;
+    }
+    default:
+      die("Usage: viot-tasktisk week-goals <list|add|update|delete> ...");
+  }
+  console.log(text);
+}
+async function runWeekPriorities(rawArgs) {
+  const { positional, flags } = parseFlags(rawArgs);
+  const [sub, ...rest] = positional;
+  await loginFromConfig();
+  const rank = flags["rank"] !== void 0 ? Number(flags["rank"]) : void 0;
+  let text;
+  switch (sub || "list") {
+    case "list":
+      text = await weekPriorities(api, { action: "list", week: flags["week"] });
+      break;
+    case "add": {
+      const body = rest.join(" ") || flags["note"];
+      if (!body && !flags["project"] && !flags["lead"]) {
+        die("Usage: viot-tasktisk week-priorities add <note> [--rank N] [--week ..] [--project <id> | --lead <id>]\n       (no --project/--lead = \u01B0u ti\xEAn chung, \xE1p d\u1EE5ng m\u1ECDi d\u1EF1 \xE1n)");
+      }
+      text = await weekPriorities(api, {
+        action: "add",
+        note: body,
+        rank,
+        week: flags["week"],
+        project_id: flags["project"] ? Number(flags["project"]) : void 0,
+        lead_id: flags["lead"] ? Number(flags["lead"]) : void 0
+      });
+      break;
+    }
+    case "update": {
+      const id = Number(rest[0]);
+      const body = rest.slice(1).join(" ") || flags["note"];
+      if (!id) die("Usage: viot-tasktisk week-priorities update <priority_id> [<note>] [--rank N]");
+      text = await weekPriorities(api, { action: "update", id, note: body || void 0, rank });
+      break;
+    }
+    case "delete": {
+      const id = Number(rest[0]);
+      if (!id) die("Usage: viot-tasktisk week-priorities delete <priority_id>");
+      text = await weekPriorities(api, { action: "delete", id });
+      break;
+    }
+    default:
+      die("Usage: viot-tasktisk week-priorities <list|add|update|delete> ...");
+  }
+  console.log(text);
+}
 async function runNotifications(rawArgs) {
   const { positional, flags } = parseFlags(rawArgs);
   await loginFromConfig();
@@ -1351,6 +1610,22 @@ Direct CLI commands (no MCP client needed):
   viot-tasktisk list-users            List all users (id, name, role)
   viot-tasktisk list-projects [--mine] [--status <status>]
                                       List projects (--mine = only where I am PM)
+  viot-tasktisk week-goals [list] [--week YYYY-Wnn|current|next|prev|all] [--mine] [--project <id>] [--user <id>]
+                                      Show weekly goals (M\u1EE5c ti\xEAu tu\u1EA7n), grouped by person
+  viot-tasktisk week-goals add <project_id> <text> [--week ..] [--user <id>] [--pct N]
+                                      Create a weekly goal (defaults: current week, yourself)
+  viot-tasktisk week-goals update <goal_id> [<text>] [--pct N] [--week ..] [--user <id>]
+                                      Edit a weekly goal / update its % progress
+  viot-tasktisk week-goals delete <goal_id>
+                                      Delete a weekly goal
+  viot-tasktisk week-priorities [list] [--week YYYY-Wnn|current|next|prev]
+                                      Show the PM's weekly priority list (\u01AFu ti\xEAn tu\u1EA7n)
+  viot-tasktisk week-priorities add <note> [--rank N] [--week ..] [--project <id> | --lead <id>]
+                                      Post a priority (no --project/--lead = chung, m\u1ECDi d\u1EF1 \xE1n)
+  viot-tasktisk week-priorities update <priority_id> [<note>] [--rank N]
+                                      Edit a priority's rank / note (scope + week are fixed)
+  viot-tasktisk week-priorities delete <priority_id>
+                                      Remove a priority
   viot-tasktisk notifications [--unread] [--limit N]
                                       Show your notifications + unread count
   viot-tasktisk notifications read <id>
@@ -1489,6 +1764,14 @@ var commands = {
     const { runListProjects: runListProjects2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
     await runListProjects2(args);
   },
+  "week-goals": async (args) => {
+    const { runWeekGoals: runWeekGoals2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runWeekGoals2(args);
+  },
+  "week-priorities": async (args) => {
+    const { runWeekPriorities: runWeekPriorities2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await runWeekPriorities2(args);
+  },
   notifications: async (args) => {
     const { runNotifications: runNotifications2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
     await runNotifications2(args);
@@ -1542,7 +1825,7 @@ try {
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.4.2" },
+  { name: "viot-tasktisk", version: "1.5.0" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -1901,6 +2184,42 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       }
     },
     {
+      name: "week_goals",
+      description: 'M\u1EE5c ti\xEAu tu\u1EA7n (m\xE0n h\xECnh "M\u1EE5c ti\xEAu tu\u1EA7n" / #weekgoals): xem \xB7 t\u1EA1o \xB7 s\u1EEDa ti\u1EBFn \u0111\u1ED9 \xB7 xo\xE1. M\u1ED7i m\u1EE5c ti\xEAu g\u1EAFn v\u1EDBi 1 d\u1EF1 \xE1n + 1 ng\u01B0\u1EDDi + 1 tu\u1EA7n ISO (YYYY-Wnn) v\xE0 c\xF3 % ho\xE0n th\xE0nh. D\xF9ng \u0111\u1EC3 l\u1EADp k\u1EBF ho\u1EA1ch tu\u1EA7n cho b\u1EA3n th\xE2n ho\u1EB7c giao m\u1EE5c ti\xEAu cho th\xE0nh vi\xEAn. action="list" (m\u1EB7c \u0111\u1ECBnh tu\u1EA7n hi\u1EC7n t\u1EA1i, week="all" \u0111\u1EC3 xem h\u1EBFt) \xB7 "add" (c\u1EA7n project_id + text) \xB7 "update" (c\u1EA7n id \u2014 th\u01B0\u1EDDng \u0111\u1EC3 c\u1EADp nh\u1EADt pct) \xB7 "delete" (c\u1EA7n id).',
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["list", "add", "update", "delete"], description: "Thao t\xE1c" },
+          id: { type: "number", description: "Goal ID (b\u1EAFt bu\u1ED9c cho update/delete)" },
+          project_id: { type: "number", description: "Project ID (b\u1EAFt bu\u1ED9c cho add; l\u1ECDc khi list)" },
+          user_id: { type: "number", description: "User ID \u0111\u01B0\u1EE3c giao (m\u1EB7c \u0111\u1ECBnh l\xE0 ch\xEDnh m\xECnh khi add) \u2014 l\u1EA5y id qua list_users" },
+          week: { type: "string", description: 'Tu\u1EA7n ISO "YYYY-Wnn" ho\u1EB7c current \xB7 next \xB7 prev \xB7 all (all ch\u1EC9 d\xF9ng cho list). M\u1EB7c \u0111\u1ECBnh tu\u1EA7n hi\u1EC7n t\u1EA1i.' },
+          text: { type: "string", description: "N\u1ED9i dung m\u1EE5c ti\xEAu (b\u1EAFt bu\u1ED9c cho add)" },
+          pct: { type: "number", description: "Ti\u1EBFn \u0111\u1ED9 0-100" },
+          set_by: { type: "string", enum: ["self", "PM"], description: "Ai \u0111\u1EB7t m\u1EE5c ti\xEAu \u2014 t\u1EF1 suy ra khi add" },
+          mine_only: { type: "boolean", description: "Ch\u1EC9 m\u1EE5c ti\xEAu c\u1EE7a t\xF4i (khi list)" }
+        },
+        required: ["action"]
+      }
+    },
+    {
+      name: "week_priorities",
+      description: '\u01AFu ti\xEAn tu\u1EA7n n\xE0y (m\xE0n h\xECnh "\u01AFu ti\xEAn tu\u1EA7n" / #priority) \u2014 danh s\xE1ch PM \u0111\u0103ng \u0111\u1EA7u tu\u1EA7n \u0111\u1EC3 c\u1EA3 nh\xF3m bi\u1EBFt vi\u1EC7c g\xEC quan tr\u1ECDng nh\u1EA5t. M\u1ED7i m\u1EE5c c\xF3 rank (1 = cao nh\u1EA5t), ghi ch\xFA, v\xE0 ph\u1EA1m vi: 1 d\u1EF1 \xE1n (project_id), 1 lead ch\u01B0a k\xFD (lead_id), ho\u1EB7c chung m\u1ECDi d\u1EF1 \xE1n (b\u1ECF tr\u1ED1ng c\u1EA3 hai). action="list" (m\u1EB7c \u0111\u1ECBnh tu\u1EA7n hi\u1EC7n t\u1EA1i) \xB7 "add" \xB7 "update" (ch\u1EC9 s\u1EEDa \u0111\u01B0\u1EE3c rank/note) \xB7 "delete" (c\u1EA7n id). Kh\xE1c week_goals: \u0111\xE2y l\xE0 \u01B0u ti\xEAn c\u1EA5p nh\xF3m/d\u1EF1 \xE1n, c\xF2n week_goals l\xE0 m\u1EE5c ti\xEAu c\u1EE7a t\u1EEBng ng\u01B0\u1EDDi.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["list", "add", "update", "delete"], description: "Thao t\xE1c" },
+          id: { type: "number", description: "Priority ID (b\u1EAFt bu\u1ED9c cho update/delete)" },
+          week: { type: "string", description: 'Tu\u1EA7n ISO "YYYY-Wnn" ho\u1EB7c current \xB7 next \xB7 prev. M\u1EB7c \u0111\u1ECBnh tu\u1EA7n hi\u1EC7n t\u1EA1i.' },
+          project_id: { type: "number", description: "Ph\u1EA1m vi = d\u1EF1 \xE1n n\xE0y (khi add). B\u1ECF tr\u1ED1ng c\u1EA3 project_id l\u1EABn lead_id = \u01B0u ti\xEAn chung m\u1ECDi d\u1EF1 \xE1n." },
+          lead_id: { type: "number", description: "Ph\u1EA1m vi = lead/c\u01A1 h\u1ED9i ch\u01B0a k\xFD (khi add)" },
+          rank: { type: "number", description: "M\u1EE9c \u01B0u ti\xEAn, 1 = cao nh\u1EA5t (default 1)" },
+          note: { type: "string", description: "Ghi ch\xFA / l\xFD do \u01B0u ti\xEAn" }
+        },
+        required: ["action"]
+      }
+    },
+    {
       name: "notifications",
       description: "List your notifications (assignments, mentions, comments, completions) with unread count, or mark one/all as read.",
       inputSchema: {
@@ -2033,6 +2352,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         break;
       case "add_phase":
         text = await addPhase(api, args);
+        break;
+      case "week_goals":
+        text = await weekGoals(api, getMe(), args);
+        break;
+      case "week_priorities":
+        text = await weekPriorities(api, args);
         break;
       case "notifications":
         text = await notifications(api, args);

@@ -9,6 +9,8 @@ Exposes 4 high-level skills to Claude — no raw API fiddling needed.
 | `update_work` | Set status / due / priority on a task or item |
 | `get_item` | Full item detail with all child tasks |
 | `add_task` | Create a task under an item |
+| `week_goals` | Mục tiêu tuần — list / add / update % / delete weekly goals per person + project |
+| `week_priorities` | Ưu tiên tuần — the PM's ranked priority list for the week (project / lead / chung) |
 
 ---
 
@@ -128,6 +130,14 @@ viot-tasktisk add-task <item_id> <title> [options]
   --descr <text>            # description
 viot-tasktisk update-task <task_id> <status>   # Plan · Todo · Doing · Done · Close · "Need help"
 viot-tasktisk update-item <item_id> <status>   # Todo · Doing · Review · Done · Cancelled
+viot-tasktisk week-goals [list|add|update|delete] ...
+  --week YYYY-Wnn|current|next|prev|all   # which ISO week (default: current)
+  --mine / --project <id> / --user <id>   # list filters
+  --pct N                                 # % progress (add/update)
+viot-tasktisk week-priorities [list|add|update|delete] ...
+  --week YYYY-Wnn|current|next|prev       # which ISO week (default: current)
+  --rank N                                # 1 = highest
+  --project <id> | --lead <id>            # scope; omit both = chung (all projects)
 viot-tasktisk --help                           # full command reference
 ```
 
@@ -137,6 +147,12 @@ Examples:
 viot-tasktisk get-item 120
 viot-tasktisk add-task 120 "Write API tests" --due 2026-07-10 --priority Cao
 viot-tasktisk update-task 482 Done
+viot-tasktisk week-goals --week next                       # team goals for next week
+viot-tasktisk week-goals add 10 "Xong API đăng nhập"        # goal for me, current week
+viot-tasktisk week-goals update 42 --pct 80                 # bump progress
+viot-tasktisk week-priorities                               # this week's priority list
+viot-tasktisk week-priorities add "Chốt nghiệm thu GĐ1" --rank 1
+viot-tasktisk week-priorities add "Fix P1" --rank 2 --project 10
 ```
 
 ---
