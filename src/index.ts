@@ -60,6 +60,10 @@ const commands: Record<string, CommandFn> = {
     const { runUpdate } = await import('./update.js');
     await runUpdate();
   },
+  upgrade: async () => {
+    const { runUpdate } = await import('./update.js');
+    await runUpdate();
+  },
   whoami: async () => {
     const { runWhoami } = await import('./cli.js');
     await runWhoami();

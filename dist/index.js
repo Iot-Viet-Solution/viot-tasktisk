@@ -1724,6 +1724,10 @@ var commands = {
     const { runUpdate: runUpdate2 } = await Promise.resolve().then(() => (init_update(), update_exports));
     await runUpdate2();
   },
+  upgrade: async () => {
+    const { runUpdate: runUpdate2 } = await Promise.resolve().then(() => (init_update(), update_exports));
+    await runUpdate2();
+  },
   whoami: async () => {
     const { runWhoami: runWhoami2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
     await runWhoami2();
