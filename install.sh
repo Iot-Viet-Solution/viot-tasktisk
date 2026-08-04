@@ -72,13 +72,33 @@ fi
 
 echo ""
 
+# If a config from a previous install is still on disk, let the user keep it
+# instead of being forced to re-type credentials on every reinstall/update.
+CONFIG_FILE="$HOME/.config/viot-tasktisk/config.json"
+KEEP_EXISTING=0
+
+if [ -f "$CONFIG_FILE" ]; then
+  printf "$(bold 'Existing configuration found') at $(dim "$CONFIG_FILE")\n"
+  if [ -r /dev/tty ]; then
+    read -rp "Keep existing settings, or set up fresh? [K/f, default K]: " keep_choice < /dev/tty
+  else
+    keep_choice="K"
+  fi
+  echo ""
+  if [[ ! "${keep_choice:-K}" =~ ^[Ff]$ ]]; then
+    KEEP_EXISTING=1
+    echo "Keeping existing settings — credentials will not be changed."
+    echo ""
+  fi
+fi
+
 # Collect QLDA credentials upfront too, so the whole thing runs unattended
 # after this point instead of stopping mid-install to ask again.
 QLDA_URL_INPUT=""
 QLDA_USERNAME_INPUT=""
 QLDA_PASSWORD_INPUT=""
 
-if [ -r /dev/tty ]; then
+if [ "$KEEP_EXISTING" -eq 0 ] && [ -r /dev/tty ]; then
   printf "$(bold 'QLDA credentials') $(dim '(used to connect to the task server)')\n\n"
   read -rp "QLDA API URL [http://localhost:3100]: " QLDA_URL_INPUT < /dev/tty
   read -rp "Username: " QLDA_USERNAME_INPUT < /dev/tty
@@ -158,7 +178,12 @@ if [ -n "$QLDA_USERNAME_INPUT" ] && [ -n "$QLDA_PASSWORD_INPUT" ]; then
   export QLDA_PASSWORD="$QLDA_PASSWORD_INPUT"
 fi
 
-if [ "$choice" = "2" ]; then
+if [ "$KEEP_EXISTING" -eq 1 ]; then
+  # Credentials are untouched — just (re)wire the Claude integrations, e.g.
+  # in case this reinstall adds a target that wasn't configured before.
+  echo "Reconfiguring Claude integrations (credentials unchanged)..."
+  viot-tasktisk configure < "$SETUP_STDIN"
+elif [ "$choice" = "2" ]; then
   VIOT_INSTALL_PREFIX="$USER_PREFIX" viot-tasktisk setup < "$SETUP_STDIN"
 else
   viot-tasktisk setup < "$SETUP_STDIN"
