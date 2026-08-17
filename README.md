@@ -48,7 +48,7 @@ The wizard prints the exact snippet to paste into Claude Desktop when done.
 ### Windows
 
 ```powershell
-npm install -g https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.0.1.tgz
+npm install -g https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.5.1.tgz
 viot-tasktisk setup
 ```
 
@@ -56,11 +56,11 @@ viot-tasktisk setup
 
 ```bash
 # Global
-npm install -g https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.0.1.tgz
+npm install -g https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.5.1.tgz
 viot-tasktisk setup
 
 # User-local
-npm install -g --prefix ~/.npm-global https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.0.1.tgz
+npm install -g --prefix ~/.npm-global https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.5.1.tgz
 export PATH="$HOME/.npm-global/bin:$PATH"   # add to ~/.zshrc or ~/.bashrc
 viot-tasktisk setup
 ```
