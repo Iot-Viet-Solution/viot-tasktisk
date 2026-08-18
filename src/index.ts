@@ -15,6 +15,7 @@ import {
 import { loadConfig } from './config.js';
 import { startUpdateCheck } from './update.js';
 import { formatError } from './errors.js';
+import { log } from './log.js';
 import type {
   UpdateWorkArgs, AddTaskArgs, MyItemsArgs, ListProjectsArgs,
   UpdateProjectArgs, AddMeetingArgs, UpdateMeetingArgs, AddMeetingActionArgs,
@@ -28,10 +29,12 @@ declare const __PKG_VERSION__: string;
 // (or thrown asynchronously once the MCP server is running) prints a raw Node
 // stack trace and dies silently from Claude's perspective instead of a clean message.
 process.on('uncaughtException', (err) => {
+  log(`uncaughtException: ${formatError(err)}`);
   process.stderr.write(`viot-tasktisk: ${formatError(err)}\n`);
   process.exit(1);
 });
 process.on('unhandledRejection', (reason) => {
+  log(`unhandledRejection: ${formatError(reason)}`);
   process.stderr.write(`viot-tasktisk: ${formatError(reason)}\n`);
   process.exit(1);
 });
@@ -67,6 +70,10 @@ const commands: Record<string, CommandFn> = {
   whoami: async () => {
     const { runWhoami } = await import('./cli.js');
     await runWhoami();
+  },
+  doctor: async () => {
+    const { runDoctor } = await import('./doctor.js');
+    await runDoctor();
   },
   dashboard: async () => {
     const { runDashboard } = await import('./cli.js');
@@ -133,6 +140,7 @@ if (subcommand && subcommand in commands) {
   try {
     await commands[subcommand](subArgs);
   } catch (e) {
+    log(`command '${subcommand}' failed: ${formatError(e)}`);
     process.stderr.write(`viot-tasktisk: ${formatError(e)}\n`);
     process.exit(1);
   }
@@ -141,10 +149,13 @@ if (subcommand && subcommand in commands) {
 
 // ── MCP server (default, no subcommand) ────────────────────────────────────────
 
+log(`starting MCP server: pkg=${__PKG_VERSION__} node=${process.version} argv1=${process.argv[1] ?? '?'}`);
+
 let cfg;
 try {
   cfg = loadConfig();
 } catch (e) {
+  log(`config load failed: ${formatError(e)}`);
   process.stderr.write(`${formatError(e)}\n`);
   process.exit(1);
 }
@@ -154,8 +165,10 @@ process.stderr.write(`viot-tasktisk: url=${cfg.url} user=${cfg.username} — log
 try {
   const me = await login(cfg.url, cfg.username, cfg.password);
   process.stderr.write(`viot-tasktisk: logged in as ${me.name} (${me.role})\n`);
+  log(`login OK: url=${cfg.url} user=${cfg.username} as ${me.name} (${me.role})`);
   startUpdateCheck(); // fire-and-forget; notifies via stderr + dashboard banner
 } catch (e) {
+  log(`login failed: url=${cfg.url} user=${cfg.username} — ${formatError(e)}`);
   process.stderr.write(`viot-tasktisk: login failed — ${formatError(e)}\n`);
   process.exit(1);
 }
@@ -706,3 +719,4 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+log('MCP transport connected, ready');

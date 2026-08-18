@@ -48,7 +48,7 @@ The wizard prints the exact snippet to paste into Claude Desktop when done.
 ### Windows
 
 ```powershell
-npm install -g https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.5.1.tgz
+npm install -g https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.6.0.tgz
 viot-tasktisk setup
 ```
 
@@ -56,11 +56,11 @@ viot-tasktisk setup
 
 ```bash
 # Global
-npm install -g https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.5.1.tgz
+npm install -g https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.6.0.tgz
 viot-tasktisk setup
 
 # User-local
-npm install -g --prefix ~/.npm-global https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.5.1.tgz
+npm install -g --prefix ~/.npm-global https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.6.0.tgz
 export PATH="$HOME/.npm-global/bin:$PATH"   # add to ~/.zshrc or ~/.bashrc
 viot-tasktisk setup
 ```
@@ -158,6 +158,21 @@ viot-tasktisk week-priorities add "Fix P1" --rank 2 --project 10
 ---
 
 ## Troubleshooting
+
+If the server runs but tools don't work in Claude (or you're helping someone else debug this
+remotely), start with:
+
+```bash
+viot-tasktisk doctor
+```
+
+It checks Node version, config validity, URL reachability, login, and whether each Claude
+client (Desktop, Code, VS Code, Antigravity, Codex) has a working — not just present — `viot-tasks`
+registration, then prints the tail of the local log. Every server run (and every direct-CLI
+command) also appends to that log regardless of what the MCP client does with its own logs, at
+`~/.config/viot-tasktisk/logs/latest.log` (`%USERPROFILE%\.config\viot-tasktisk\logs\latest.log`
+on Windows) — useful when a client only shows a generic "failed to connect" with no detail. Paste
+the `doctor` output (or the log file) when asking for help.
 
 | Symptom | Fix |
 |---|---|

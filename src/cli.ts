@@ -352,6 +352,7 @@ Setup:
   viot-tasktisk configure             Re-configure Claude integrations only
   viot-tasktisk update                Update to the latest version
   viot-tasktisk whoami                Show configured URL/username (no login attempt)
+  viot-tasktisk doctor                Diagnose config/connectivity/registration issues
 
 Direct CLI commands (no MCP client needed):
   viot-tasktisk dashboard             Show your personal task dashboard

@@ -173,6 +173,31 @@ export function isAlreadyConfigured(target: ClaudeTarget): boolean {
   } catch { return false; }
 }
 
+/** The `command` currently registered for viot-tasks in this target's config, if any. */
+export function getConfiguredCommand(target: ClaudeTarget): string | undefined {
+  if (!existsSync(target.configPath)) return undefined;
+  try {
+    if (target.format === 'toml') {
+      const content = readToml(target.configPath);
+      const m = content.match(
+        new RegExp(`\\[mcp_servers\\.viot-tasks\\][\\s\\S]*?\\ncommand\\s*=\\s*"([^"]*)"`),
+      );
+      return m?.[1];
+    }
+    if (target.format === 'claude-cli') {
+      const servers = (readJson(target.configPath).mcpServers ?? {}) as Record<string, { command?: string }>;
+      return servers['viot-tasks']?.command;
+    }
+    const cfg = readJson(target.configPath);
+    if (target.format === 'vscode') {
+      const servers = ((cfg.mcp as Record<string, unknown>)?.servers ?? {}) as Record<string, { command?: string }>;
+      return servers['viot-tasks']?.command;
+    }
+    const servers = (cfg.mcpServers ?? {}) as Record<string, { command?: string }>;
+    return servers['viot-tasks']?.command;
+  } catch { return undefined; }
+}
+
 /**
  * Every target here spawns the MCP server as its own subprocess rather than
  * through your interactive shell, so none of them see a PATH change that

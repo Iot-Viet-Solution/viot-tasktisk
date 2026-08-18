@@ -27,6 +27,18 @@ export function getLocalVersion(): string {
   return LOCAL_VERSION;
 }
 
+/** Fetches the remote package.json version. Never throws — returns undefined on any failure. */
+export async function fetchRemoteVersion(): Promise<string | undefined> {
+  try {
+    const res = await fetch(REMOTE_PKG, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return undefined;
+    const remote = (await res.json()) as { version?: string };
+    return remote.version;
+  } catch {
+    return undefined;
+  }
+}
+
 // ── Startup background check ──────────────────────────────────────────────────
 
 /**
@@ -36,19 +48,13 @@ export function getLocalVersion(): string {
  */
 export function startUpdateCheck(): void {
   void (async () => {
-    try {
-      const res = await fetch(REMOTE_PKG, { signal: AbortSignal.timeout(6000) });
-      if (!res.ok) return;
-      const remote = (await res.json()) as { version?: string };
-      if (remote.version && remote.version !== LOCAL_VERSION) {
-        _updateAvailable = remote.version;
-        process.stderr.write(
-          `[viot-tasktisk] Update available: ${LOCAL_VERSION} → ${remote.version}\n` +
-          `  Run: viot-tasktisk update\n`,
-        );
-      }
-    } catch {
-      // Silently ignore — never disrupt server startup
+    const remoteVersion = await fetchRemoteVersion();
+    if (remoteVersion && remoteVersion !== LOCAL_VERSION) {
+      _updateAvailable = remoteVersion;
+      process.stderr.write(
+        `[viot-tasktisk] Update available: ${LOCAL_VERSION} → ${remoteVersion}\n` +
+        `  Run: viot-tasktisk update\n`,
+      );
     }
   })();
 }
@@ -81,14 +87,7 @@ export async function runUpdate(): Promise<void> {
   console.log('viot-tasktisk — update\n');
   console.log(`Current version : ${LOCAL_VERSION}`);
 
-  let remoteVersion: string | undefined;
-  try {
-    const res = await fetch(REMOTE_PKG, { signal: AbortSignal.timeout(6000) });
-    if (res.ok) {
-      const pkg = (await res.json()) as { version?: string };
-      remoteVersion = pkg.version;
-    }
-  } catch { /* network unavailable */ }
+  let remoteVersion = await fetchRemoteVersion();
 
   if (remoteVersion) {
     if (remoteVersion === LOCAL_VERSION) {

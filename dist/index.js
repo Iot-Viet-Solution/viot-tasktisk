@@ -91,6 +91,7 @@ var init_config = __esm({
 // src/update.ts
 var update_exports = {};
 __export(update_exports, {
+  fetchRemoteVersion: () => fetchRemoteVersion,
   getLocalVersion: () => getLocalVersion,
   getUpdateAvailable: () => getUpdateAvailable,
   runUpdate: () => runUpdate,
@@ -106,21 +107,26 @@ function getUpdateAvailable() {
 function getLocalVersion() {
   return LOCAL_VERSION;
 }
+async function fetchRemoteVersion() {
+  try {
+    const res = await fetch(REMOTE_PKG, { signal: AbortSignal.timeout(6e3) });
+    if (!res.ok) return void 0;
+    const remote = await res.json();
+    return remote.version;
+  } catch {
+    return void 0;
+  }
+}
 function startUpdateCheck() {
   void (async () => {
-    try {
-      const res = await fetch(REMOTE_PKG, { signal: AbortSignal.timeout(6e3) });
-      if (!res.ok) return;
-      const remote = await res.json();
-      if (remote.version && remote.version !== LOCAL_VERSION) {
-        _updateAvailable = remote.version;
-        process.stderr.write(
-          `[viot-tasktisk] Update available: ${LOCAL_VERSION} \u2192 ${remote.version}
+    const remoteVersion = await fetchRemoteVersion();
+    if (remoteVersion && remoteVersion !== LOCAL_VERSION) {
+      _updateAvailable = remoteVersion;
+      process.stderr.write(
+        `[viot-tasktisk] Update available: ${LOCAL_VERSION} \u2192 ${remoteVersion}
   Run: viot-tasktisk update
 `
-        );
-      }
-    } catch {
+      );
     }
   })();
 }
@@ -146,15 +152,7 @@ function resolvePrefix() {
 async function runUpdate() {
   console.log("viot-tasktisk \u2014 update\n");
   console.log(`Current version : ${LOCAL_VERSION}`);
-  let remoteVersion;
-  try {
-    const res = await fetch(REMOTE_PKG, { signal: AbortSignal.timeout(6e3) });
-    if (res.ok) {
-      const pkg = await res.json();
-      remoteVersion = pkg.version;
-    }
-  } catch {
-  }
+  let remoteVersion = await fetchRemoteVersion();
   if (remoteVersion) {
     if (remoteVersion === LOCAL_VERSION) {
       console.log(`Remote version  : ${remoteVersion} (already up to date)`);
@@ -192,7 +190,7 @@ var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
-    LOCAL_VERSION = true ? "1.5.1" : "dev";
+    LOCAL_VERSION = true ? "1.6.0" : "dev";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
@@ -911,13 +909,13 @@ async function logTime(apiFn, args) {
   const { action, task_id, id, minutes, date, from, to, note } = args;
   if (action === "log") {
     if (task_id == null || minutes == null) throw new Error("task_id and minutes are required to log time");
-    const log = await apiFn("POST", "/me/task-logs", { task_id, minutes, date, note });
-    return `Logged ${fmtHours(log.minutes)}h on task #${log.task_id} (${log.date})`;
+    const log2 = await apiFn("POST", "/me/task-logs", { task_id, minutes, date, note });
+    return `Logged ${fmtHours(log2.minutes)}h on task #${log2.task_id} (${log2.date})`;
   }
   if (action === "update") {
     if (id == null) throw new Error("id is required to update a time log");
-    const log = await apiFn("PATCH", `/task-logs/${id}`, { minutes, date, note });
-    return `Updated ${fmtLog(log, false)}`;
+    const log2 = await apiFn("PATCH", `/task-logs/${id}`, { minutes, date, note });
+    return `Updated ${fmtLog(log2, false)}`;
   }
   if (action === "delete") {
     if (id == null) throw new Error("id is required to delete a time log");
@@ -972,49 +970,113 @@ var init_skills = __esm({
   }
 });
 
+// src/errors.ts
+function formatError(err) {
+  if (err instanceof Error) {
+    const cause = err.cause;
+    switch (cause?.code) {
+      case "EAI_AGAIN":
+      case "ENOTFOUND":
+        return `Could not resolve host${cause.hostname ? ` "${cause.hostname}"` : ""} \u2014 check the url in your config (run \`viot-tasktisk setup\` to fix it).`;
+      case "ECONNREFUSED":
+        return "Connection refused \u2014 is the QLDA server running and reachable at that url?";
+      case "ETIMEDOUT":
+      case "UND_ERR_CONNECT_TIMEOUT":
+        return "Connection timed out \u2014 check the url in your config and your network.";
+    }
+    return err.message;
+  }
+  return String(err);
+}
+var init_errors = __esm({
+  "src/errors.ts"() {
+    "use strict";
+  }
+});
+
+// src/log.ts
+import { appendFileSync, existsSync, mkdirSync, readFileSync as readFileSync3, renameSync, statSync } from "fs";
+import { homedir as homedir3 } from "os";
+import { join as join3 } from "path";
+function rotateIfNeeded() {
+  try {
+    if (existsSync(LOG_PATH) && statSync(LOG_PATH).size > MAX_BYTES) {
+      renameSync(LOG_PATH, join3(LOG_DIR, "previous.log"));
+    }
+  } catch {
+  }
+}
+function log(line) {
+  try {
+    mkdirSync(LOG_DIR, { recursive: true });
+    rotateIfNeeded();
+    appendFileSync(LOG_PATH, `[${(/* @__PURE__ */ new Date()).toISOString()}] ${line}
+`);
+  } catch {
+  }
+}
+function tail(maxLines = 60) {
+  try {
+    const content = readFileSync3(LOG_PATH, "utf-8");
+    const lines = content.split("\n").filter(Boolean);
+    return lines.slice(-maxLines).join("\n");
+  } catch {
+    return "";
+  }
+}
+var LOG_DIR, LOG_PATH, MAX_BYTES;
+var init_log = __esm({
+  "src/log.ts"() {
+    "use strict";
+    LOG_DIR = join3(homedir3(), ".config", "viot-tasktisk", "logs");
+    LOG_PATH = join3(LOG_DIR, "latest.log");
+    MAX_BYTES = 1e6;
+  }
+});
+
 // src/claude-config.ts
-import { readFileSync as readFileSync3, writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync as readFileSync4, writeFileSync, mkdirSync as mkdirSync2, existsSync as existsSync2 } from "fs";
 import { execFileSync as execFileSync2 } from "child_process";
-import { homedir as homedir3, platform } from "os";
-import { join as join3, dirname } from "path";
+import { homedir as homedir4, platform } from "os";
+import { join as join4, dirname } from "path";
 function claudeDesktopTarget() {
   const p = platform();
   let configPath;
   if (p === "darwin") {
-    configPath = join3(homedir3(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
+    configPath = join4(homedir4(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
   } else if (p === "win32") {
-    configPath = join3(process.env.APPDATA ?? join3(homedir3(), "AppData", "Roaming"), "Claude", "claude_desktop_config.json");
+    configPath = join4(process.env.APPDATA ?? join4(homedir4(), "AppData", "Roaming"), "Claude", "claude_desktop_config.json");
   } else {
-    configPath = join3(homedir3(), ".config", "Claude", "claude_desktop_config.json");
+    configPath = join4(homedir4(), ".config", "Claude", "claude_desktop_config.json");
   }
   return { name: "Claude Desktop", configPath, format: "mcp-servers" };
 }
 function claudeCodeTarget() {
-  return { name: "Claude Code", configPath: join3(homedir3(), ".claude.json"), format: "claude-cli" };
+  return { name: "Claude Code", configPath: join4(homedir4(), ".claude.json"), format: "claude-cli" };
 }
 function vscodeTarget() {
   const p = platform();
   let configPath;
   if (p === "darwin") {
-    configPath = join3(homedir3(), "Library", "Application Support", "Code", "User", "settings.json");
+    configPath = join4(homedir4(), "Library", "Application Support", "Code", "User", "settings.json");
   } else if (p === "win32") {
-    configPath = join3(process.env.APPDATA ?? join3(homedir3(), "AppData", "Roaming"), "Code", "User", "settings.json");
+    configPath = join4(process.env.APPDATA ?? join4(homedir4(), "AppData", "Roaming"), "Code", "User", "settings.json");
   } else {
-    configPath = join3(homedir3(), ".config", "Code", "User", "settings.json");
+    configPath = join4(homedir4(), ".config", "Code", "User", "settings.json");
   }
   return { name: "VS Code", configPath, format: "vscode" };
 }
 function antigravityTarget() {
   return {
     name: "Antigravity CLI (Google)",
-    configPath: join3(homedir3(), ".gemini", "config", "mcp_config.json"),
+    configPath: join4(homedir4(), ".gemini", "config", "mcp_config.json"),
     format: "mcp-servers"
   };
 }
 function codexTarget() {
   return {
     name: "Codex CLI (OpenAI)",
-    configPath: join3(homedir3(), ".codex", "config.toml"),
+    configPath: join4(homedir4(), ".codex", "config.toml"),
     format: "toml"
   };
 }
@@ -1029,18 +1091,18 @@ function allTargets() {
 }
 function readJson(path) {
   try {
-    return JSON.parse(readFileSync3(path, "utf-8"));
+    return JSON.parse(readFileSync4(path, "utf-8"));
   } catch {
     return {};
   }
 }
 function writeJson(path, data) {
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync2(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
 }
 function readToml(path) {
   try {
-    return readFileSync3(path, "utf-8");
+    return readFileSync4(path, "utf-8");
   } catch {
     return "";
   }
@@ -1065,7 +1127,7 @@ ${section}
 command = "${command}"
 `;
   }
-  mkdirSync(dirname(filePath), { recursive: true });
+  mkdirSync2(dirname(filePath), { recursive: true });
   writeFileSync(filePath, content);
 }
 function injectMcpServer(target, command) {
@@ -1093,7 +1155,7 @@ function injectMcpServer(target, command) {
   writeJson(target.configPath, cfg2);
 }
 function isAlreadyConfigured(target) {
-  if (!existsSync(target.configPath)) return false;
+  if (!existsSync2(target.configPath)) return false;
   try {
     if (target.format === "toml") {
       return tomlHasSection(readToml(target.configPath), "viot-tasks");
@@ -1112,9 +1174,34 @@ function isAlreadyConfigured(target) {
     return false;
   }
 }
+function getConfiguredCommand(target) {
+  if (!existsSync2(target.configPath)) return void 0;
+  try {
+    if (target.format === "toml") {
+      const content = readToml(target.configPath);
+      const m = content.match(
+        new RegExp(`\\[mcp_servers\\.viot-tasks\\][\\s\\S]*?\\ncommand\\s*=\\s*"([^"]*)"`)
+      );
+      return m?.[1];
+    }
+    if (target.format === "claude-cli") {
+      const servers2 = readJson(target.configPath).mcpServers ?? {};
+      return servers2["viot-tasks"]?.command;
+    }
+    const cfg2 = readJson(target.configPath);
+    if (target.format === "vscode") {
+      const servers2 = cfg2.mcp?.servers ?? {};
+      return servers2["viot-tasks"]?.command;
+    }
+    const servers = cfg2.mcpServers ?? {};
+    return servers["viot-tasks"]?.command;
+  } catch {
+    return void 0;
+  }
+}
 function resolveCommand(installPrefix) {
   if (!installPrefix) return "viot-tasktisk";
-  return join3(installPrefix, "bin", "viot-tasktisk");
+  return join4(installPrefix, "bin", "viot-tasktisk");
 }
 var init_claude_config = __esm({
   "src/claude-config.ts"() {
@@ -1129,7 +1216,7 @@ __export(setup_exports, {
   runSetup: () => runSetup
 });
 import { createInterface } from "readline/promises";
-import { writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync as existsSync2, readFileSync as readFileSync4 } from "fs";
+import { writeFileSync as writeFileSync2, mkdirSync as mkdirSync3, existsSync as existsSync3, readFileSync as readFileSync5 } from "fs";
 import { dirname as dirname2 } from "path";
 function readPassword(prompt) {
   return new Promise((resolve) => {
@@ -1196,9 +1283,9 @@ async function runConfigure(installPrefix) {
 async function runSetup() {
   console.log("viot-tasktisk \u2014 setup wizard\n");
   let existing = {};
-  if (existsSync2(CONFIG_PATH)) {
+  if (existsSync3(CONFIG_PATH)) {
     try {
-      existing = JSON.parse(readFileSync4(CONFIG_PATH, "utf-8"));
+      existing = JSON.parse(readFileSync5(CONFIG_PATH, "utf-8"));
       console.log(`Updating existing config: ${CONFIG_PATH}
 `);
     } catch {
@@ -1235,7 +1322,7 @@ async function runSetup() {
   }
   const installPrefix = process.env.VIOT_INSTALL_PREFIX?.trim() || existing.installPrefix;
   const config = { url, username, password, ...installPrefix ? { installPrefix } : {} };
-  mkdirSync2(dirname2(CONFIG_PATH), { recursive: true });
+  mkdirSync3(dirname2(CONFIG_PATH), { recursive: true });
   writeFileSync2(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", { mode: 384 });
   console.log(`
 \u2713 Credentials saved to ${CONFIG_PATH}
@@ -1589,6 +1676,7 @@ Setup:
   viot-tasktisk configure             Re-configure Claude integrations only
   viot-tasktisk update                Update to the latest version
   viot-tasktisk whoami                Show configured URL/username (no login attempt)
+  viot-tasktisk doctor                Diagnose config/connectivity/registration issues
 
 Direct CLI commands (no MCP client needed):
   viot-tasktisk dashboard             Show your personal task dashboard
@@ -1662,44 +1750,125 @@ var init_cli = __esm({
   }
 });
 
+// src/doctor.ts
+var doctor_exports = {};
+__export(doctor_exports, {
+  runDoctor: () => runDoctor
+});
+import { existsSync as existsSync4, readFileSync as readFileSync6 } from "fs";
+import { platform as platform2 } from "os";
+function row(label, value) {
+  return `  ${label.padEnd(20)} ${value}`;
+}
+async function runDoctor() {
+  const out = ["viot-tasktisk \u2014 doctor", ""];
+  out.push("Environment");
+  out.push(row("Node version", process.version));
+  out.push(row("Platform", `${platform2()} ${process.arch}`));
+  out.push(row("Binary path", process.argv[1] ?? "(unknown)"));
+  out.push(row("Installed version", getLocalVersion()));
+  const remote = await fetchRemoteVersion();
+  out.push(row(
+    "Latest version",
+    remote ? remote === getLocalVersion() ? `${remote} (up to date)` : `${remote} (update available \u2014 run 'viot-tasktisk update')` : "(could not fetch \u2014 check network)"
+  ));
+  out.push("");
+  out.push("Config");
+  const envActive = !!(process.env.QLDA_URL && process.env.QLDA_USERNAME && process.env.QLDA_PASSWORD);
+  let cfg2;
+  if (envActive) {
+    out.push(row("Source", "QLDA_URL / QLDA_USERNAME / QLDA_PASSWORD env vars"));
+    cfg2 = { url: process.env.QLDA_URL, username: process.env.QLDA_USERNAME, password: process.env.QLDA_PASSWORD };
+  } else {
+    out.push(row("Source", `config file (${CONFIG_PATH})`));
+    if (!existsSync4(CONFIG_PATH)) {
+      out.push(row("Config file", "NOT FOUND \u2014 run `viot-tasktisk setup`"));
+    } else {
+      try {
+        cfg2 = JSON.parse(readFileSync6(CONFIG_PATH, "utf-8"));
+        out.push(row("Config file", "found, valid JSON"));
+      } catch (e) {
+        out.push(row("Config file", `found but NOT valid JSON \u2014 ${formatError(e)}`));
+      }
+    }
+  }
+  if (cfg2) {
+    out.push(row("URL", cfg2.url));
+    out.push(row("Username", cfg2.username));
+    out.push(row("Password", cfg2.password ? `set (${cfg2.password.length} chars)` : "NOT SET"));
+    out.push(row("Install prefix", cfg2.installPrefix ?? "(global)"));
+  }
+  out.push("");
+  out.push("Connectivity");
+  if (cfg2) {
+    try {
+      const res = await fetch(cfg2.url, { signal: AbortSignal.timeout(5e3) });
+      out.push(row("URL reachable", `yes (HTTP ${res.status})`));
+    } catch (e) {
+      out.push(row("URL reachable", `NO \u2014 ${formatError(e)}`));
+    }
+    try {
+      const me = await login(cfg2.url, cfg2.username, cfg2.password);
+      out.push(row("Login", `OK \u2014 logged in as ${me.name} (${me.role})`));
+    } catch (e) {
+      out.push(row("Login", `FAILED \u2014 ${formatError(e)}`));
+    }
+  } else {
+    out.push(row("Skipped", "no usable config to test"));
+  }
+  out.push("");
+  out.push("Claude client registrations");
+  for (const target of allTargets()) {
+    if (!isAlreadyConfigured(target)) {
+      out.push(row(target.name, "not configured"));
+      continue;
+    }
+    const cmd = getConfiguredCommand(target);
+    let status = `registered \u2192 ${cmd ?? "(command not found in config)"}`;
+    if (cmd && cmd !== "viot-tasktisk" && !existsSync4(cmd)) {
+      status += "  \u26A0 that path does not exist on disk \u2014 re-run `viot-tasktisk configure`";
+    }
+    out.push(row(target.name, status));
+  }
+  out.push("");
+  out.push(`Recent log (${LOG_PATH})`);
+  const recent = tail(40);
+  out.push(recent ? recent.split("\n").map((l) => "  " + l).join("\n") : "  (no log entries yet)");
+  console.log(out.join("\n"));
+}
+var init_doctor = __esm({
+  "src/doctor.ts"() {
+    "use strict";
+    init_config();
+    init_api();
+    init_errors();
+    init_update();
+    init_claude_config();
+    init_log();
+  }
+});
+
 // src/index.ts
 init_api();
 init_skills();
 init_config();
 init_update();
+init_errors();
+init_log();
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
-
-// src/errors.ts
-function formatError(err) {
-  if (err instanceof Error) {
-    const cause = err.cause;
-    switch (cause?.code) {
-      case "EAI_AGAIN":
-      case "ENOTFOUND":
-        return `Could not resolve host${cause.hostname ? ` "${cause.hostname}"` : ""} \u2014 check the url in your config (run \`viot-tasktisk setup\` to fix it).`;
-      case "ECONNREFUSED":
-        return "Connection refused \u2014 is the QLDA server running and reachable at that url?";
-      case "ETIMEDOUT":
-      case "UND_ERR_CONNECT_TIMEOUT":
-        return "Connection timed out \u2014 check the url in your config and your network.";
-    }
-    return err.message;
-  }
-  return String(err);
-}
-
-// src/index.ts
 process.on("uncaughtException", (err) => {
+  log(`uncaughtException: ${formatError(err)}`);
   process.stderr.write(`viot-tasktisk: ${formatError(err)}
 `);
   process.exit(1);
 });
 process.on("unhandledRejection", (reason) => {
+  log(`unhandledRejection: ${formatError(reason)}`);
   process.stderr.write(`viot-tasktisk: ${formatError(reason)}
 `);
   process.exit(1);
@@ -1731,6 +1900,10 @@ var commands = {
   whoami: async () => {
     const { runWhoami: runWhoami2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
     await runWhoami2();
+  },
+  doctor: async () => {
+    const { runDoctor: runDoctor2 } = await Promise.resolve().then(() => (init_doctor(), doctor_exports));
+    await runDoctor2();
   },
   dashboard: async () => {
     const { runDashboard: runDashboard2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
@@ -1802,16 +1975,19 @@ if (subcommand && subcommand in commands) {
   try {
     await commands[subcommand](subArgs);
   } catch (e) {
+    log(`command '${subcommand}' failed: ${formatError(e)}`);
     process.stderr.write(`viot-tasktisk: ${formatError(e)}
 `);
     process.exit(1);
   }
   process.exit(0);
 }
+log(`starting MCP server: pkg=${"1.6.0"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
 var cfg;
 try {
   cfg = loadConfig();
 } catch (e) {
+  log(`config load failed: ${formatError(e)}`);
   process.stderr.write(`${formatError(e)}
 `);
   process.exit(1);
@@ -1822,14 +1998,16 @@ try {
   const me = await login(cfg.url, cfg.username, cfg.password);
   process.stderr.write(`viot-tasktisk: logged in as ${me.name} (${me.role})
 `);
+  log(`login OK: url=${cfg.url} user=${cfg.username} as ${me.name} (${me.role})`);
   startUpdateCheck();
 } catch (e) {
+  log(`login failed: url=${cfg.url} user=${cfg.username} \u2014 ${formatError(e)}`);
   process.stderr.write(`viot-tasktisk: login failed \u2014 ${formatError(e)}
 `);
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.5.1" },
+  { name: "viot-tasktisk", version: "1.6.0" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -2385,3 +2563,4 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 });
 var transport = new StdioServerTransport();
 await server.connect(transport);
+log("MCP transport connected, ready");
