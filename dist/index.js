@@ -16,12 +16,13 @@ __export(api_exports, {
   getMe: () => getMe,
   login: () => login
 });
-async function login(base, username, password) {
+async function login(base, username, password, signal) {
   baseUrl = base.replace(/\/$/, "");
   const res = await fetch(`${baseUrl}/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password })
+    body: JSON.stringify({ username, password }),
+    signal
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -190,7 +191,7 @@ var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
-    LOCAL_VERSION = true ? "1.6.0" : "dev";
+    LOCAL_VERSION = true ? "1.6.1" : "dev";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
@@ -1110,6 +1111,14 @@ function readToml(path) {
 function tomlHasSection(content, serverName) {
   return content.includes(`[mcp_servers.${serverName}]`);
 }
+function tomlSectionBody(content, serverName) {
+  const header = `[mcp_servers.${serverName}]`;
+  const start = content.indexOf(header);
+  if (start === -1) return void 0;
+  const bodyStart = start + header.length;
+  const nextSection = content.indexOf("\n[", bodyStart);
+  return content.slice(bodyStart, nextSection === -1 ? void 0 : nextSection);
+}
 function injectToml(filePath, serverName, command) {
   let content = readToml(filePath);
   const section = `[mcp_servers.${serverName}]`;
@@ -1178,10 +1187,8 @@ function getConfiguredCommand(target) {
   if (!existsSync2(target.configPath)) return void 0;
   try {
     if (target.format === "toml") {
-      const content = readToml(target.configPath);
-      const m = content.match(
-        new RegExp(`\\[mcp_servers\\.viot-tasks\\][\\s\\S]*?\\ncommand\\s*=\\s*"([^"]*)"`)
-      );
+      const body = tomlSectionBody(readToml(target.configPath), "viot-tasks");
+      const m = body?.match(/command\s*=\s*"([^"]*)"/);
       return m?.[1];
     }
     if (target.format === "claude-cli") {
@@ -1201,6 +1208,7 @@ function getConfiguredCommand(target) {
 }
 function resolveCommand(installPrefix) {
   if (!installPrefix) return "viot-tasktisk";
+  if (platform() === "win32") return join4(installPrefix, "viot-tasktisk.cmd");
   return join4(installPrefix, "bin", "viot-tasktisk");
 }
 var init_claude_config = __esm({
@@ -1808,7 +1816,7 @@ async function runDoctor() {
       out.push(row("URL reachable", `NO \u2014 ${formatError(e)}`));
     }
     try {
-      const me = await login(cfg2.url, cfg2.username, cfg2.password);
+      const me = await login(cfg2.url, cfg2.username, cfg2.password, AbortSignal.timeout(5e3));
       out.push(row("Login", `OK \u2014 logged in as ${me.name} (${me.role})`));
     } catch (e) {
       out.push(row("Login", `FAILED \u2014 ${formatError(e)}`));
@@ -1982,7 +1990,7 @@ if (subcommand && subcommand in commands) {
   }
   process.exit(0);
 }
-log(`starting MCP server: pkg=${"1.6.0"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
+log(`starting MCP server: pkg=${"1.6.1"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
 var cfg;
 try {
   cfg = loadConfig();
@@ -2007,7 +2015,7 @@ try {
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.6.0" },
+  { name: "viot-tasktisk", version: "1.6.1" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({

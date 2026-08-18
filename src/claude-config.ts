@@ -101,6 +101,16 @@ function tomlHasSection(content: string, serverName: string): boolean {
   return content.includes(`[mcp_servers.${serverName}]`);
 }
 
+/** Text of a `[mcp_servers.<name>]` section, up to the next top-level section header (or EOF). */
+function tomlSectionBody(content: string, serverName: string): string | undefined {
+  const header = `[mcp_servers.${serverName}]`;
+  const start = content.indexOf(header);
+  if (start === -1) return undefined;
+  const bodyStart = start + header.length;
+  const nextSection = content.indexOf('\n[', bodyStart);
+  return content.slice(bodyStart, nextSection === -1 ? undefined : nextSection);
+}
+
 function injectToml(filePath: string, serverName: string, command: string): void {
   let content = readToml(filePath);
   const section = `[mcp_servers.${serverName}]`;
@@ -178,10 +188,8 @@ export function getConfiguredCommand(target: ClaudeTarget): string | undefined {
   if (!existsSync(target.configPath)) return undefined;
   try {
     if (target.format === 'toml') {
-      const content = readToml(target.configPath);
-      const m = content.match(
-        new RegExp(`\\[mcp_servers\\.viot-tasks\\][\\s\\S]*?\\ncommand\\s*=\\s*"([^"]*)"`),
-      );
+      const body = tomlSectionBody(readToml(target.configPath), 'viot-tasks');
+      const m = body?.match(/command\s*=\s*"([^"]*)"/);
       return m?.[1];
     }
     if (target.format === 'claude-cli') {
@@ -207,5 +215,8 @@ export function getConfiguredCommand(target: ClaudeTarget): string | undefined {
  */
 export function resolveCommand(installPrefix: string | undefined): string {
   if (!installPrefix) return 'viot-tasktisk';
+  // npm's global-prefix bin shims live in different places per platform: a `bin/`
+  // subfolder on macOS/Linux, but directly in the prefix dir (as `<name>.cmd`) on Windows.
+  if (platform() === 'win32') return join(installPrefix, 'viot-tasktisk.cmd');
   return join(installPrefix, 'bin', 'viot-tasktisk');
 }

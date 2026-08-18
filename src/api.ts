@@ -13,12 +13,13 @@ let token: string | null = null;
 let currentUser: User | null = null;
 let baseUrl = '';
 
-export async function login(base: string, username: string, password: string): Promise<User> {
+export async function login(base: string, username: string, password: string, signal?: AbortSignal): Promise<User> {
   baseUrl = base.replace(/\/$/, '');
   const res = await fetch(`${baseUrl}/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
+    signal,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: string };

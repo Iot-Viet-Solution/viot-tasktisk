@@ -71,7 +71,7 @@ export async function runDoctor(): Promise<void> {
       out.push(row('URL reachable', `NO — ${formatError(e)}`));
     }
     try {
-      const me = await login(cfg.url, cfg.username, cfg.password);
+      const me = await login(cfg.url, cfg.username, cfg.password, AbortSignal.timeout(5000));
       out.push(row('Login', `OK — logged in as ${me.name} (${me.role})`));
     } catch (e) {
       out.push(row('Login', `FAILED — ${formatError(e)}`));
