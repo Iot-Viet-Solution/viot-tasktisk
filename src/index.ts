@@ -256,6 +256,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: 'list_projects',
       description:
         'List projects with basic info: id, name, customer, status, progress %, MD used/budget, start/end. ' +
+        'When called with no filters, also includes a synthetic "🏠 Nội bộ — ngoài dự án (R&D, đào tạo, họp...)" ' +
+        'entry (id "internal") for logging work that is not tied to any real project. ' +
         'Set mine_only=true to only get projects where the logged-in user is PM.',
       inputSchema: {
         type: 'object' as const,

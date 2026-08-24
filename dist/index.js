@@ -191,7 +191,7 @@ var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
-    LOCAL_VERSION = true ? "1.6.1" : "dev";
+    LOCAL_VERSION = true ? "1.6.2" : "dev";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
@@ -378,10 +378,12 @@ async function listProjects(apiFn, me, args = {}) {
   let projs = await apiFn("GET", "/projects");
   if (mine_only && me) projs = projs.filter((p) => p.pm === me.id);
   if (status) projs = projs.filter((p) => p.status === status);
-  if (!projs.length) {
+  const showInternal = !mine_only && !status;
+  if (!projs.length && !showInternal) {
     return mine_only ? "_B\u1EA1n kh\xF4ng ph\u1EA3i PM c\u1EE7a d\u1EF1 \xE1n n\xE0o._" : "_No projects found._";
   }
-  const title = mine_only ? `# D\u1EF1 \xE1n c\u1EE7a t\xF4i (${projs.length})` : `# Projects (${projs.length})`;
+  const count = projs.length + (showInternal ? 1 : 0);
+  const title = mine_only ? `# D\u1EF1 \xE1n c\u1EE7a t\xF4i (${count})` : `# Projects (${count})`;
   const lines = [title, ""];
   projs.forEach((p) => {
     lines.push(`- **[project:${p.id}]** ${p.name}`);
@@ -397,6 +399,10 @@ async function listProjects(apiFn, me, args = {}) {
     ].join(" \xB7 ");
     lines.push(`  ${meta2}`);
   });
+  if (showInternal) {
+    lines.push(`- **[project:internal]** ${INTERNAL_PROJECT_LABEL}`);
+    lines.push("  Kh\xF4ng ph\u1EA3i d\u1EF1 \xE1n th\u1EADt \u2014 kh\xF4ng c\xF3 id s\u1ED1, kh\xF4ng d\xF9ng \u0111\u01B0\u1EE3c v\u1EDBi get_project/add_task.");
+  }
   return lines.join("\n");
 }
 async function getProject(apiFn, { id }) {
@@ -964,10 +970,12 @@ async function comment(apiFn, args) {
     ...cmts.map((c) => `- [comment:${c.id}] user:${c.user_id ?? "?"} (${c.created ?? "\u2014"}): ${c.text}`)
   ].join("\n");
 }
+var INTERNAL_PROJECT_LABEL;
 var init_skills = __esm({
   "src/skills.ts"() {
     "use strict";
     init_update();
+    INTERNAL_PROJECT_LABEL = "\u{1F3E0} N\u1ED9i b\u1ED9 \u2014 ngo\xE0i d\u1EF1 \xE1n (R&D, \u0111\xE0o t\u1EA1o, h\u1ECDp...)";
   }
 });
 
@@ -1990,7 +1998,7 @@ if (subcommand && subcommand in commands) {
   }
   process.exit(0);
 }
-log(`starting MCP server: pkg=${"1.6.1"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
+log(`starting MCP server: pkg=${"1.6.2"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
 var cfg;
 try {
   cfg = loadConfig();
@@ -2015,7 +2023,7 @@ try {
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.6.1" },
+  { name: "viot-tasktisk", version: "1.6.2" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -2084,7 +2092,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "list_projects",
-      description: "List projects with basic info: id, name, customer, status, progress %, MD used/budget, start/end. Set mine_only=true to only get projects where the logged-in user is PM.",
+      description: 'List projects with basic info: id, name, customer, status, progress %, MD used/budget, start/end. When called with no filters, also includes a synthetic "\u{1F3E0} N\u1ED9i b\u1ED9 \u2014 ngo\xE0i d\u1EF1 \xE1n (R&D, \u0111\xE0o t\u1EA1o, h\u1ECDp...)" entry (id "internal") for logging work that is not tied to any real project. Set mine_only=true to only get projects where the logged-in user is PM.',
       inputSchema: {
         type: "object",
         properties: {

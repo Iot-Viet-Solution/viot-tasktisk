@@ -345,6 +345,14 @@ export interface ListProjectsArgs {
   status?: string;
 }
 
+/**
+ * Synthetic "no real project" bucket for logging non-project work (R&D, training,
+ * internal meetings, ...). Mirrors the hardcoded "internal" option in qlda-viot's
+ * own timesheet form (public/index.html) — it has no backing /projects row, so it
+ * only makes sense in the unfiltered list (mine_only/status don't apply to it).
+ */
+const INTERNAL_PROJECT_LABEL = '🏠 Nội bộ — ngoài dự án (R&D, đào tạo, họp...)';
+
 export async function listProjects(
   apiFn: ApiFn,
   me: User | null,
@@ -354,12 +362,14 @@ export async function listProjects(
   let projs = await apiFn<Project[]>('GET', '/projects');
   if (mine_only && me) projs = projs.filter(p => p.pm === me.id);
   if (status) projs = projs.filter(p => p.status === status);
-  if (!projs.length) {
+  const showInternal = !mine_only && !status;
+  if (!projs.length && !showInternal) {
     return mine_only ? '_Bạn không phải PM của dự án nào._' : '_No projects found._';
   }
+  const count = projs.length + (showInternal ? 1 : 0);
   const title = mine_only
-    ? `# Dự án của tôi (${projs.length})`
-    : `# Projects (${projs.length})`;
+    ? `# Dự án của tôi (${count})`
+    : `# Projects (${count})`;
   const lines: string[] = [title, ''];
   projs.forEach(p => {
     lines.push(`- **[project:${p.id}]** ${p.name}`);
@@ -375,6 +385,10 @@ export async function listProjects(
     ].join(' · ');
     lines.push(`  ${meta2}`);
   });
+  if (showInternal) {
+    lines.push(`- **[project:internal]** ${INTERNAL_PROJECT_LABEL}`);
+    lines.push('  Không phải dự án thật — không có id số, không dùng được với get_project/add_task.');
+  }
   return lines.join('\n');
 }
 
