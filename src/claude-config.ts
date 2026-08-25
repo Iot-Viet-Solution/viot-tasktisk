@@ -141,11 +141,27 @@ export function injectMcpServer(target: ClaudeTarget, command: string): void {
   }
 
   if (target.format === 'claude-cli') {
+    // On Windows, `claude` resolves to a `claude.cmd` npm shim — child_process
+    // will not execute .cmd/.bat files unless `shell: true` is set, otherwise
+    // it fails with ENOENT even though `claude` genuinely is on PATH.
+    const execOpts = { shell: platform() === 'win32' };
+
     // Idempotent: drop any existing entry first so re-running configure updates
     // the command instead of erroring on a duplicate name.
-    try { execFileSync('claude', ['mcp', 'remove', '-s', 'user', 'viot-tasks'], { stdio: 'ignore' }); }
+    try { execFileSync('claude', ['mcp', 'remove', '-s', 'user', 'viot-tasks'], { ...execOpts, stdio: 'ignore' }); }
     catch { /* wasn't configured yet */ }
-    execFileSync('claude', ['mcp', 'add', '-s', 'user', 'viot-tasks', '--', command]);
+
+    try {
+      execFileSync('claude', ['mcp', 'add', '-s', 'user', 'viot-tasks', '--', command], execOpts);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(
+          'Claude Code CLI (`claude`) was not found on PATH. Install Claude Code first, ' +
+          'then re-run `viot-tasktisk setup` (or `viot-tasktisk configure`) to register this MCP server.',
+        );
+      }
+      throw err;
+    }
     return;
   }
 

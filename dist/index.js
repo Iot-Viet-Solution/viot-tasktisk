@@ -191,7 +191,7 @@ var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
-    LOCAL_VERSION = true ? "1.6.2" : "dev";
+    LOCAL_VERSION = true ? "1.6.3" : "dev";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
@@ -1153,11 +1153,21 @@ function injectMcpServer(target, command) {
     return;
   }
   if (target.format === "claude-cli") {
+    const execOpts = { shell: platform() === "win32" };
     try {
-      execFileSync2("claude", ["mcp", "remove", "-s", "user", "viot-tasks"], { stdio: "ignore" });
+      execFileSync2("claude", ["mcp", "remove", "-s", "user", "viot-tasks"], { ...execOpts, stdio: "ignore" });
     } catch {
     }
-    execFileSync2("claude", ["mcp", "add", "-s", "user", "viot-tasks", "--", command]);
+    try {
+      execFileSync2("claude", ["mcp", "add", "-s", "user", "viot-tasks", "--", command], execOpts);
+    } catch (err) {
+      if (err.code === "ENOENT") {
+        throw new Error(
+          "Claude Code CLI (`claude`) was not found on PATH. Install Claude Code first, then re-run `viot-tasktisk setup` (or `viot-tasktisk configure`) to register this MCP server."
+        );
+      }
+      throw err;
+    }
     return;
   }
   const cfg2 = readJson(target.configPath);
@@ -1998,7 +2008,7 @@ if (subcommand && subcommand in commands) {
   }
   process.exit(0);
 }
-log(`starting MCP server: pkg=${"1.6.2"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
+log(`starting MCP server: pkg=${"1.6.3"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
 var cfg;
 try {
   cfg = loadConfig();
@@ -2023,7 +2033,7 @@ try {
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.6.2" },
+  { name: "viot-tasktisk", version: "1.6.3" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
