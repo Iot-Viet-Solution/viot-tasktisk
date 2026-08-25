@@ -4,10 +4,10 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { login, api, getMe } from './api.js';
+import { login, api, getMe, setMaxRetries } from './api.js';
 import {
   dashboard, updateWork, addTask, getItem, myItems, listUsers, listProjects,
-  getProject, updateProject, projectHealth, projectEvm, listProjectMembers, listSprints,
+  getProject, addProject, updateProject, projectHealth, projectEvm, listProjectMembers, listSprints,
   listMeetings, getMeeting, addMeeting, updateMeeting, addMeetingAction,
   addBlock, updateBlock, addFeature, updateFeature, addItem, addSprint, deleteBlock, deleteFeature, addPhase,
   weekGoals, weekPriorities, notifications, logTime, comment,
@@ -18,7 +18,7 @@ import { formatError } from './errors.js';
 import { log } from './log.js';
 import type {
   UpdateWorkArgs, AddTaskArgs, MyItemsArgs, ListProjectsArgs,
-  UpdateProjectArgs, AddMeetingArgs, UpdateMeetingArgs, AddMeetingActionArgs,
+  AddProjectArgs, UpdateProjectArgs, AddMeetingArgs, UpdateMeetingArgs, AddMeetingActionArgs,
   AddBlockArgs, UpdateBlockArgs, AddFeatureArgs, UpdateFeatureArgs, AddItemArgs, AddSprintArgs, AddPhaseArgs,
   WeekGoalsArgs, WeekPrioritiesArgs, NotificationsArgs, LogTimeArgs, CommentArgs,
 } from './skills.js';
@@ -160,6 +160,7 @@ try {
   process.exit(1);
 }
 
+setMaxRetries(cfg.maxRetries ?? 3);
 process.stderr.write(`viot-tasktisk: url=${cfg.url} user=${cfg.username} — logging in...\n`);
 
 try {
@@ -276,6 +277,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         type: 'object' as const,
         properties: { id: { type: 'number', description: 'Project ID' } },
         required: ['id'],
+      },
+    },
+    {
+      name: 'add_project',
+      description: 'Create a new project. Only "name" is required; status defaults to "Demo" if omitted.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          name:        { type: 'string', description: 'Project name (required)' },
+          customer:    { type: 'string' },
+          customer_id: { type: 'number', description: 'ID from customer directory (optional)' },
+          status:      { type: 'string', enum: ['Demo', 'Đang chạy', 'Bảo trì', 'Tạm dừng', 'Đóng', 'Huỷ'], description: 'Defaults to "Demo"' },
+          start:       { type: 'string', description: 'Start date YYYY-MM-DD' },
+          end:         { type: 'string', description: 'End date YYYY-MM-DD' },
+          md_budget:   { type: 'number', description: 'ManDay budget' },
+          lead_id:     { type: 'number', description: 'User ID of lead' },
+          pm:          { type: 'number', description: 'User ID of PM' },
+          vision:      { type: 'string' },
+        },
+        required: ['name'],
       },
     },
     {
@@ -684,6 +705,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'list_users':  text = await listUsers(api); break;
       case 'list_projects': text = await listProjects(api, getMe(), args as unknown as ListProjectsArgs); break;
       case 'get_project': text = await getProject(api, args as { id: number }); break;
+      case 'add_project': text = await addProject(api, args as unknown as AddProjectArgs); break;
       case 'update_project': text = await updateProject(api, args as unknown as UpdateProjectArgs); break;
       case 'project_health': text = await projectHealth(api, args as { id: number }); break;
       case 'project_evm': text = await projectEvm(api, args as { id: number }); break;
@@ -712,8 +734,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
     return { content: [{ type: 'text' as const, text }] };
   } catch (e) {
+    log(`tool '${name}' failed: ${formatError(e)}`);
     return {
-      content: [{ type: 'text' as const, text: `Error: ${(e as Error).message}` }],
+      content: [{ type: 'text' as const, text: `Error: ${formatError(e)}` }],
       isError: true,
     };
   }

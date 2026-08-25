@@ -3,7 +3,7 @@
  * These run as a one-shot process: login → call skill → print → exit.
  */
 
-import { login, api } from './api.js';
+import { login, api, setMaxRetries } from './api.js';
 import { dashboard, updateWork, addTask, getItem, myItems, listUsers, listProjects, weekGoals, weekPriorities, notifications, logTime, comment } from './skills.js';
 import type { CommentArgs } from './skills.js';
 import { loadConfig, CONFIG_PATH } from './config.js';
@@ -39,6 +39,7 @@ function parseFlags(argv: string[]): { positional: string[]; flags: Record<strin
 
 async function loginFromConfig(): Promise<void> {
   const cfg = loadConfig();
+  setMaxRetries(cfg.maxRetries ?? 3);
   await login(cfg.url, cfg.username, cfg.password);
 }
 

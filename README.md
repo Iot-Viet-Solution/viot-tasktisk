@@ -196,6 +196,11 @@ QLDA_PASSWORD=secret \
 viot-tasktisk
 ```
 
+Requests that fail with a network error or a gateway/rate-limit status (408, 429, 502, 503, 504, 524 —
+e.g. Cloudflare's "524 A Timeout Occurred") are retried automatically with exponential backoff, up to
+3 times by default. Override with `QLDA_MAX_RETRIES=<n>`, or by adding `"maxRetries": <n>` to
+`~/.config/viot-tasktisk/config.json`.
+
 ---
 
 ## Update

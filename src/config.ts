@@ -8,6 +8,8 @@ export interface Config {
   password: string;
   /** npm prefix used at install time. undefined = global, path = user-local. */
   installPrefix?: string;
+  /** Retry attempts for transient API failures (network errors, 429/502/503/504/524). Default 3. */
+  maxRetries?: number;
 }
 
 export const CONFIG_PATH = join(homedir(), '.config', 'viot-tasktisk', 'config.json');
@@ -19,6 +21,7 @@ export function loadConfig(): Config {
       url: process.env.QLDA_URL,
       username: process.env.QLDA_USERNAME,
       password: process.env.QLDA_PASSWORD,
+      maxRetries: process.env.QLDA_MAX_RETRIES ? Number(process.env.QLDA_MAX_RETRIES) : undefined,
     };
   }
   try {

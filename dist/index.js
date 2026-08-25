@@ -14,19 +14,55 @@ var api_exports = {};
 __export(api_exports, {
   api: () => api,
   getMe: () => getMe,
-  login: () => login
+  login: () => login,
+  setMaxRetries: () => setMaxRetries
 });
+function setMaxRetries(n) {
+  maxRetries = Number.isFinite(n) && n >= 0 ? n : DEFAULT_MAX_RETRIES;
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function isAbortError(e) {
+  return e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError");
+}
+async function fetchWithRetry(doFetch) {
+  let attempt = 0;
+  for (; ; ) {
+    let res;
+    let networkErr;
+    try {
+      res = await doFetch();
+    } catch (e) {
+      if (isAbortError(e)) throw e;
+      networkErr = e;
+    }
+    const retryableStatus = res !== void 0 && RETRYABLE_STATUS.has(res.status);
+    if (!networkErr && !retryableStatus) return res;
+    if (attempt >= maxRetries) {
+      if (networkErr) throw networkErr;
+      return res;
+    }
+    attempt++;
+    await sleep(Math.min(500 * 2 ** (attempt - 1), 8e3));
+  }
+}
+function httpErrorMessage(res) {
+  const status = `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""}`;
+  if (!RETRYABLE_STATUS.has(res.status)) return status;
+  return `${status} \u2014 gateway/timeout error, still failing after ${maxRetries} ${maxRetries === 1 ? "retry" : "retries"}`;
+}
 async function login(base, username, password, signal) {
   baseUrl = base.replace(/\/$/, "");
-  const res = await fetch(`${baseUrl}/login`, {
+  const res = await fetchWithRetry(() => fetch(`${baseUrl}/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
     signal
-  });
+  }));
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error ?? `Login failed: HTTP ${res.status}`);
+    throw new Error(err.error ?? `Login failed: ${httpErrorMessage(res)}`);
   }
   const data = await res.json();
   token = data.token;
@@ -34,30 +70,33 @@ async function login(base, username, password, signal) {
   return data.user;
 }
 async function api(method, path, body) {
-  const res = await fetch(`${baseUrl}${path}`, {
+  const res = await fetchWithRetry(() => fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`
     },
     body: body !== void 0 ? JSON.stringify(body) : void 0
-  });
+  }));
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error ?? `HTTP ${res.status} ${res.statusText}`);
+    throw new Error(err.error ?? httpErrorMessage(res));
   }
   return res.json();
 }
 function getMe() {
   return currentUser;
 }
-var token, currentUser, baseUrl;
+var token, currentUser, baseUrl, DEFAULT_MAX_RETRIES, maxRetries, RETRYABLE_STATUS;
 var init_api = __esm({
   "src/api.ts"() {
     "use strict";
     token = null;
     currentUser = null;
     baseUrl = "";
+    DEFAULT_MAX_RETRIES = 3;
+    maxRetries = DEFAULT_MAX_RETRIES;
+    RETRYABLE_STATUS = /* @__PURE__ */ new Set([408, 429, 502, 503, 504, 524]);
   }
 });
 
@@ -70,7 +109,8 @@ function loadConfig() {
     return {
       url: process.env.QLDA_URL,
       username: process.env.QLDA_USERNAME,
-      password: process.env.QLDA_PASSWORD
+      password: process.env.QLDA_PASSWORD,
+      maxRetries: process.env.QLDA_MAX_RETRIES ? Number(process.env.QLDA_MAX_RETRIES) : void 0
     };
   }
   try {
@@ -191,7 +231,7 @@ var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
-    LOCAL_VERSION = true ? "1.6.3" : "dev";
+    LOCAL_VERSION = true ? "1.7.0" : "dev";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
@@ -440,6 +480,11 @@ async function getProject(apiFn, { id }) {
   if (gates.length) lines.push(`
 **Gate \u0111\xE3 qua**: ${gates.map((g) => g.code).join(" \xB7 ")}`);
   return lines.join("\n");
+}
+async function addProject(apiFn, args) {
+  if (!args.name?.trim()) throw new Error("Thi\u1EBFu t\xEAn d\u1EF1 \xE1n");
+  const p = await apiFn("POST", "/projects", args);
+  return `\u0110\xE3 t\u1EA1o d\u1EF1 \xE1n [project:${p.id}] ${p.name} \xB7 Status: ${p.status}`;
 }
 async function updateProject(apiFn, args) {
   const { id, ...rest } = args;
@@ -1410,6 +1455,7 @@ function parseFlags(argv) {
 }
 async function loginFromConfig() {
   const cfg2 = loadConfig();
+  setMaxRetries(cfg2.maxRetries ?? 3);
   await login(cfg2.url, cfg2.username, cfg2.password);
 }
 async function runDashboard() {
@@ -2008,7 +2054,7 @@ if (subcommand && subcommand in commands) {
   }
   process.exit(0);
 }
-log(`starting MCP server: pkg=${"1.6.3"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
+log(`starting MCP server: pkg=${"1.7.0"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
 var cfg;
 try {
   cfg = loadConfig();
@@ -2018,6 +2064,7 @@ try {
 `);
   process.exit(1);
 }
+setMaxRetries(cfg.maxRetries ?? 3);
 process.stderr.write(`viot-tasktisk: url=${cfg.url} user=${cfg.username} \u2014 logging in...
 `);
 try {
@@ -2033,7 +2080,7 @@ try {
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.6.3" },
+  { name: "viot-tasktisk", version: "1.7.0" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -2118,6 +2165,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         type: "object",
         properties: { id: { type: "number", description: "Project ID" } },
         required: ["id"]
+      }
+    },
+    {
+      name: "add_project",
+      description: 'Create a new project. Only "name" is required; status defaults to "Demo" if omitted.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Project name (required)" },
+          customer: { type: "string" },
+          customer_id: { type: "number", description: "ID from customer directory (optional)" },
+          status: { type: "string", enum: ["Demo", "\u0110ang ch\u1EA1y", "B\u1EA3o tr\xEC", "T\u1EA1m d\u1EEBng", "\u0110\xF3ng", "Hu\u1EF7"], description: 'Defaults to "Demo"' },
+          start: { type: "string", description: "Start date YYYY-MM-DD" },
+          end: { type: "string", description: "End date YYYY-MM-DD" },
+          md_budget: { type: "number", description: "ManDay budget" },
+          lead_id: { type: "number", description: "User ID of lead" },
+          pm: { type: "number", description: "User ID of PM" },
+          vision: { type: "string" }
+        },
+        required: ["name"]
       }
     },
     {
@@ -2504,6 +2571,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "get_project":
         text = await getProject(api, args);
         break;
+      case "add_project":
+        text = await addProject(api, args);
+        break;
       case "update_project":
         text = await updateProject(api, args);
         break;
@@ -2581,8 +2651,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
     return { content: [{ type: "text", text }] };
   } catch (e) {
+    log(`tool '${name}' failed: ${formatError(e)}`);
     return {
-      content: [{ type: "text", text: `Error: ${e.message}` }],
+      content: [{ type: "text", text: `Error: ${formatError(e)}` }],
       isError: true
     };
   }

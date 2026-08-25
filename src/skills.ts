@@ -463,6 +463,25 @@ export async function getProject(apiFn: ApiFn, { id }: { id: number }): Promise<
   return lines.join('\n');
 }
 
+export interface AddProjectArgs {
+  name: string;
+  customer?: string;
+  customer_id?: number;
+  status?: string;
+  start?: string;
+  end?: string;
+  md_budget?: number;
+  lead_id?: number;
+  pm?: number;
+  vision?: string;
+}
+
+export async function addProject(apiFn: ApiFn, args: AddProjectArgs): Promise<string> {
+  if (!args.name?.trim()) throw new Error('Thiếu tên dự án');
+  const p = await apiFn<Project>('POST', '/projects', args);
+  return `Đã tạo dự án [project:${p.id}] ${p.name} · Status: ${p.status}`;
+}
+
 export interface UpdateProjectArgs {
   id: number;
   name?: string;
