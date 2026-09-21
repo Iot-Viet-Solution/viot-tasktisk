@@ -4,11 +4,11 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { login, api, getMe, setMaxRetries } from './api.js';
+import { login, api, apiBinary, getMe, setMaxRetries } from './api.js';
 import {
   dashboard, updateWork, addTask, getItem, myItems, listUsers, listProjects,
   getProject, addProject, updateProject, projectHealth, projectEvm, listProjectMembers, listSprints,
-  listMeetings, getMeeting, addMeeting, updateMeeting, addMeetingAction,
+  listMeetings, getMeeting, getAttachment, meetingCalendar, listMeetingSeries, addMeeting, updateMeeting, addMeetingAction,
   addBlock, updateBlock, addFeature, updateFeature, addItem, addSprint, deleteBlock, deleteFeature, addPhase,
   weekGoals, weekPriorities, notifications, logTime, comment,
 } from './skills.js';
@@ -18,7 +18,7 @@ import { formatError } from './errors.js';
 import { log } from './log.js';
 import type {
   UpdateWorkArgs, AddTaskArgs, MyItemsArgs, ListProjectsArgs,
-  AddProjectArgs, UpdateProjectArgs, AddMeetingArgs, UpdateMeetingArgs, AddMeetingActionArgs,
+  AddProjectArgs, UpdateProjectArgs, MeetingCalendarArgs, GetMeetingArgs, ImageBlock, AddMeetingArgs, UpdateMeetingArgs, AddMeetingActionArgs,
   AddBlockArgs, UpdateBlockArgs, AddFeatureArgs, UpdateFeatureArgs, AddItemArgs, AddSprintArgs, AddPhaseArgs,
   WeekGoalsArgs, WeekPrioritiesArgs, NotificationsArgs, LogTimeArgs, CommentArgs,
 } from './skills.js';
@@ -377,11 +377,51 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'get_meeting',
       description:
-        'Get meeting detail: purpose, tổng kết, nội dung thảo luận, kế hoạch hành động (với người phụ trách + hạn).',
+        'Get meeting detail: purpose, tổng kết, nội dung thảo luận, kế hoạch hành động (với người phụ trách + hạn), ' +
+        'ghi chú, and attached files. Attached images (e.g. whiteboard photos, screenshots) are returned inline so you can read them.',
       inputSchema: {
         type: 'object' as const,
-        properties: { id: { type: 'number', description: 'Meeting ID' } },
+        properties: {
+          id:             { type: 'number', description: 'Meeting ID' },
+          include_images: { type: 'boolean', description: 'Return attached images inline (default true)' },
+          max_images:     { type: 'number', description: 'Max images to inline (default 5); the rest are listed as [att:ID] for get_attachment' },
+        },
         required: ['id'],
+      },
+    },
+    {
+      name: 'get_attachment',
+      description:
+        'Read one attachment by its [att:ID] (from get_meeting etc.). Images (png/jpg/gif/webp, ≤2 MB) are returned inline ' +
+        'for you to view; small text files are returned as text; other types only report metadata.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: { id: { type: 'number', description: 'Attachment ID' } },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'meeting_calendar',
+      description:
+        'Meeting calendar across ALL projects (incl. company-wide meetings) for a date range, grouped by day, ' +
+        'compact: time, title, project, type, host, format/location. Includes recurring-series occurrences ' +
+        '([series:ID], not yet minuted) and real meetings ([meeting:ID], use get_meeting). Defaults to this week.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          from:          { type: 'string', description: 'Start date YYYY-MM-DD (default: Monday this week)' },
+          to:            { type: 'string', description: 'End date YYYY-MM-DD (default: Sunday this week)' },
+          project_id:    { type: 'number', description: 'Only meetings of this project' },
+          include_links: { type: 'boolean', description: 'Include online meeting URLs (default false)' },
+        },
+      },
+    },
+    {
+      name: 'list_meeting_series',
+      description: 'Recurring meeting definitions (weekly/biweekly): schedule, host, participants, purpose.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: { project_id: { type: 'number', description: 'Only series of this project' } },
       },
     },
     {
@@ -696,6 +736,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params;
   try {
     let text: string;
+    let images: ImageBlock[] = [];
     switch (name) {
       case 'dashboard':   text = await dashboard(api, getMe()); break;
       case 'update_work': text = await updateWork(api, args as unknown as UpdateWorkArgs); break;
@@ -712,7 +753,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'list_project_members': text = await listProjectMembers(api, args as { id: number }); break;
       case 'list_sprints': text = await listSprints(api, args as { id: number }); break;
       case 'list_meetings': text = await listMeetings(api, args as { id: number }); break;
-      case 'get_meeting': text = await getMeeting(api, args as { id: number }); break;
+      case 'meeting_calendar': text = await meetingCalendar(api, args as MeetingCalendarArgs); break;
+      case 'list_meeting_series': text = await listMeetingSeries(api, args as { project_id?: number }); break;
+      case 'get_meeting': ({ text, images } = await getMeeting(api, apiBinary, args as unknown as GetMeetingArgs)); break;
+      case 'get_attachment': ({ text, images } = await getAttachment(apiBinary, args as { id: number })); break;
       case 'add_meeting': text = await addMeeting(api, args as unknown as AddMeetingArgs); break;
       case 'update_meeting': text = await updateMeeting(api, args as unknown as UpdateMeetingArgs); break;
       case 'add_meeting_action': text = await addMeetingAction(api, args as unknown as AddMeetingActionArgs); break;
@@ -732,7 +776,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'comment':     text = await comment(api, args as unknown as CommentArgs); break;
       default: throw new Error(`Unknown tool: ${name}`);
     }
-    return { content: [{ type: 'text' as const, text }] };
+    return {
+      content: [
+        { type: 'text' as const, text },
+        ...images.map(i => ({ type: 'image' as const, data: i.data, mimeType: i.mimeType })),
+      ],
+    };
   } catch (e) {
     log(`tool '${name}' failed: ${formatError(e)}`);
     return {

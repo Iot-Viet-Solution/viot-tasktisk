@@ -105,6 +105,30 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
   return res.json() as Promise<T>;
 }
 
+export interface BinaryRes {
+  data: Buffer;
+  mimeType: string;
+  /** Filename from Content-Disposition (RFC 5987 `filename*=UTF-8''…`), if the server sent one. */
+  filename: string | null;
+}
+
+/** GET a raw file (e.g. `/att/:id`) instead of JSON. Refuses bodies over `maxBytes` before reading them. */
+export async function apiBinary(path: string, maxBytes = Infinity): Promise<BinaryRes> {
+  const res = await fetchWithRetry(() => fetch(`${baseUrl}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }));
+  if (!res.ok) throw new Error(httpErrorMessage(res));
+  const declared = Number(res.headers.get('content-length'));
+  if (declared > maxBytes) throw new Error(`File too large: ${declared} bytes (limit ${maxBytes})`);
+  const data = Buffer.from(await res.arrayBuffer());
+  if (data.length > maxBytes) throw new Error(`File too large: ${data.length} bytes (limit ${maxBytes})`);
+  const cd = res.headers.get('content-disposition') || '';
+  const m = cd.match(/filename\*=UTF-8''([^;]+)/i);
+  let filename: string | null = null;
+  if (m) { try { filename = decodeURIComponent(m[1]); } catch { filename = m[1]; } }
+  return { data, mimeType: (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim(), filename };
+}
+
 export function getMe(): User | null {
   return currentUser;
 }

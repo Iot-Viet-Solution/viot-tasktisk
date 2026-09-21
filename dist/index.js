@@ -13,6 +13,7 @@ var __export = (target, all) => {
 var api_exports = {};
 __export(api_exports, {
   api: () => api,
+  apiBinary: () => apiBinary,
   getMe: () => getMe,
   login: () => login,
   setMaxRetries: () => setMaxRetries
@@ -83,6 +84,27 @@ async function api(method, path, body) {
     throw new Error(err.error ?? httpErrorMessage(res));
   }
   return res.json();
+}
+async function apiBinary(path, maxBytes = Infinity) {
+  const res = await fetchWithRetry(() => fetch(`${baseUrl}${path}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  }));
+  if (!res.ok) throw new Error(httpErrorMessage(res));
+  const declared = Number(res.headers.get("content-length"));
+  if (declared > maxBytes) throw new Error(`File too large: ${declared} bytes (limit ${maxBytes})`);
+  const data = Buffer.from(await res.arrayBuffer());
+  if (data.length > maxBytes) throw new Error(`File too large: ${data.length} bytes (limit ${maxBytes})`);
+  const cd = res.headers.get("content-disposition") || "";
+  const m = cd.match(/filename\*=UTF-8''([^;]+)/i);
+  let filename = null;
+  if (m) {
+    try {
+      filename = decodeURIComponent(m[1]);
+    } catch {
+      filename = m[1];
+    }
+  }
+  return { data, mimeType: (res.headers.get("content-type") || "application/octet-stream").split(";")[0].trim(), filename };
 }
 function getMe() {
   return currentUser;
@@ -231,7 +253,7 @@ var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
-    LOCAL_VERSION = true ? "1.7.0" : "dev";
+    LOCAL_VERSION = true ? "1.8.0" : "dev";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
@@ -613,14 +635,98 @@ async function listMeetings(apiFn, { id }) {
   });
   return lines.join("\n");
 }
-async function getMeeting(apiFn, { id }) {
-  const projs = await apiFn("GET", "/projects");
-  for (const p of projs) {
-    const meetings = await apiFn("GET", `/projects/${p.id}/meetings`);
-    const m = meetings.find((x) => x.id === id);
-    if (m) return formatMeetingDetail(m);
+function attDisplayName(name) {
+  return String(name || "").replace(/^\d+_/, "") || "t\u1EC7p";
+}
+function imageMimeOf(name) {
+  const ext = /\.([a-z0-9]+)$/i.exec(name || "")?.[1]?.toLowerCase();
+  return ext ? IMAGE_MIME[ext] || null : null;
+}
+async function fetchMeeting(apiFn, id) {
+  try {
+    return await apiFn("GET", `/meetings/${id}`);
+  } catch {
+    const projs = await apiFn("GET", "/projects");
+    for (const p of projs) {
+      const meetings = await apiFn("GET", `/projects/${p.id}/meetings`);
+      const m = meetings.find((x) => x.id === id);
+      if (m) return m;
+    }
+    return null;
   }
-  return `_Kh\xF4ng t\xECm th\u1EA5y cu\u1ED9c h\u1ECDp #${id}._`;
+}
+async function getMeeting(apiFn, binFn, args) {
+  const { id, include_images = true } = args;
+  const maxImages = args.max_images ?? DEFAULT_MAX_IMAGES;
+  const m = await fetchMeeting(apiFn, id);
+  if (!m) return { text: `_Kh\xF4ng t\xECm th\u1EA5y cu\u1ED9c h\u1ECDp #${id}._`, images: [] };
+  const lines = [formatMeetingDetail(m)];
+  const images = [];
+  let atts = [];
+  try {
+    atts = await apiFn("GET", `/attachments/meeting/${id}`);
+  } catch {
+  }
+  const notes = atts.filter((a) => a.kind === "note" && (a.text || "").trim());
+  const files = atts.filter((a) => a.kind !== "note" && a.kind !== "comment" && a.kind !== "link" && a.name);
+  if (notes.length) {
+    lines.push(`
+## \u{1F5D2}\uFE0F Ghi ch\xFA (${notes.length})`);
+    notes.forEach((n) => lines.push(`- ${(n.text || "").trim()}`));
+  }
+  if (files.length) {
+    lines.push(`
+## \u{1F4CE} T\u1EC7p \u0111\xEDnh k\xE8m (${files.length})`);
+    for (const f of files) {
+      const label = `[att:${f.id}] ${attDisplayName(f.name)}`;
+      const isImage = IMAGE_EXT_RE.test(f.name || "");
+      const mime = imageMimeOf(f.name);
+      if (!isImage) {
+        lines.push(`- ${label} (get_attachment \u0111\u1EC3 \u0111\u1ECDc)`);
+        continue;
+      }
+      if (!include_images) {
+        lines.push(`- \u{1F5BC}\uFE0F ${label}`);
+        continue;
+      }
+      if (!mime) {
+        lines.push(`- \u{1F5BC}\uFE0F ${label} \u2014 \u0111\u1ECBnh d\u1EA1ng kh\xF4ng h\u1ED7 tr\u1EE3 hi\u1EC3n th\u1ECB`);
+        continue;
+      }
+      if (images.length >= maxImages) {
+        lines.push(`- \u{1F5BC}\uFE0F ${label} \u2014 v\u01B0\u1EE3t gi\u1EDBi h\u1EA1n ${maxImages} \u1EA3nh, d\xF9ng get_attachment`);
+        continue;
+      }
+      try {
+        const bin = await binFn(`/att/${f.id}`, MAX_IMAGE_BYTES);
+        images.push({ data: bin.data.toString("base64"), mimeType: mime });
+        lines.push(`- \u{1F5BC}\uFE0F ${label} \u2014 \u1EA3nh #${images.length} b\xEAn d\u01B0\u1EDBi`);
+      } catch (e) {
+        lines.push(`- \u{1F5BC}\uFE0F ${label} \u2014 kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+  return { text: lines.join("\n"), images };
+}
+async function getAttachment(binFn, { id }) {
+  const bin = await binFn(`/att/${id}`, MAX_IMAGE_BYTES * 2);
+  const name = bin.filename || `att:${id}`;
+  const mime = Object.values(IMAGE_MIME).includes(bin.mimeType) ? bin.mimeType : null;
+  if (mime) {
+    if (bin.data.length > MAX_IMAGE_BYTES) {
+      return { text: `[att:${id}] ${name} \u2014 \u1EA3nh ${(bin.data.length / 1048576).toFixed(1)} MB v\u01B0\u1EE3t gi\u1EDBi h\u1EA1n ${MAX_IMAGE_BYTES / 1048576} MB.`, images: [] };
+    }
+    return { text: `[att:${id}] ${name} (${mime}, ${Math.round(bin.data.length / 1024)} KB)`, images: [{ data: bin.data.toString("base64"), mimeType: mime }] };
+  }
+  if (/^text\/|json$|csv$/.test(bin.mimeType)) {
+    const body = bin.data.subarray(0, MAX_TEXT_BYTES).toString("utf8");
+    const cut = bin.data.length > MAX_TEXT_BYTES ? `
+\u2026 (c\u1EAFt \u1EDF ${MAX_TEXT_BYTES / 1024} KB / ${Math.round(bin.data.length / 1024)} KB)` : "";
+    return { text: `[att:${id}] ${name}
+
+${body}${cut}`, images: [] };
+  }
+  return { text: `[att:${id}] ${name} \u2014 ${bin.mimeType}, ${Math.round(bin.data.length / 1024)} KB. \u0110\u1ECBnh d\u1EA1ng n\xE0y ch\u01B0a \u0111\u1ECDc \u0111\u01B0\u1EE3c qua MCP.`, images: [] };
 }
 function formatMeetingDetail(m) {
   const lines = [];
@@ -649,6 +755,72 @@ ${m.summary}`);
       lines.push(`${i + 1}. ${a.text} \u2014 \u{1F464} ${who} \xB7 \u23F0 ${a.due || "ch\u01B0a \u0111\u1EB7t h\u1EA1n"}`);
     });
   }
+  return lines.join("\n");
+}
+function joinParts(parts, sep = " \xB7 ") {
+  return parts.filter((p) => p !== null && p !== void 0 && p !== false && String(p).trim() !== "").join(sep);
+}
+function endTime(start, durationMin) {
+  if (!start) return "";
+  if (!durationMin) return start;
+  const [h, m] = start.split(":").map(Number);
+  const t = h * 60 + m + durationMin;
+  return `${start}\u2013${String(Math.floor(t / 60) % 24).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+}
+async function meetingCalendar(apiFn, args) {
+  const qs = new URLSearchParams();
+  if (args.from) qs.set("from", args.from);
+  if (args.to) qs.set("to", args.to);
+  const q = qs.toString();
+  let items = await apiFn("GET", `/meetings${q ? "?" + q : ""}`);
+  if (args.project_id != null) items = items.filter((i) => i.project_id === args.project_id);
+  const range = `${args.from || "tu\u1EA7n n\xE0y"}${args.to ? " \u2192 " + args.to : ""}`;
+  if (!items.length) return `_Kh\xF4ng c\xF3 cu\u1ED9c h\u1ECDp trong kho\u1EA3ng ${range}._`;
+  const lines = [`# L\u1ECBch h\u1ECDp (${items.length}) \xB7 ${range}`];
+  let day = "";
+  for (const i of items) {
+    if (i.date !== day) {
+      day = i.date;
+      lines.push("", `## ${day}`);
+    }
+    const ref = i.id != null ? `[meeting:${i.id}]` : `[series:${i.series_id}]`;
+    const where = joinParts([i.format, i.location]);
+    lines.push("- " + joinParts([
+      endTime(i.start_time, i.duration_min),
+      `${ref} **${i.title}**`,
+      i.project_name,
+      i.type,
+      // "done" is the default for real meetings and "scheduled" for virtual ones — only surface the odd ones.
+      i.status && !["done", "scheduled"].includes(i.status) ? i.status : "",
+      i.host_name && `\u{1F464} ${i.host_name}`,
+      where,
+      args.include_links && i.online_url,
+      i.virtual && "_ch\u01B0a t\u1EA1o bi\xEAn b\u1EA3n_"
+    ]));
+  }
+  return lines.join("\n");
+}
+async function listMeetingSeries(apiFn, { project_id }) {
+  let series = await apiFn("GET", "/meeting-series");
+  series = series.filter((s) => s.active !== false && (project_id == null || s.project_id === project_id));
+  if (!series.length) return "_Kh\xF4ng c\xF3 chu\u1ED7i h\u1ECDp \u0111\u1ECBnh k\u1EF3._";
+  const lines = [`# H\u1ECDp \u0111\u1ECBnh k\u1EF3 (${series.length})`, ""];
+  series.forEach((s) => {
+    const when = joinParts([
+      s.weekday ? WEEKDAY_VI[s.weekday] : "",
+      endTime(s.start_time, s.duration_min),
+      s.freq === "biweekly" ? "2 tu\u1EA7n/l\u1EA7n" : ""
+    ], " ");
+    lines.push("- " + joinParts([
+      `[series:${s.id}] **${s.name}**`,
+      when && `\u23F0 ${when}`,
+      s.project_name,
+      s.host_text && `\u{1F464} ${s.host_text}`,
+      s.participants_text && `\u{1F465} ${s.participants_text}`,
+      joinParts([s.format, s.location], " ")
+    ]));
+    if (s.purpose) lines.push(`  \u21B3 ${s.purpose}`);
+  });
   return lines.join("\n");
 }
 async function addMeeting(apiFn, args) {
@@ -1015,12 +1187,24 @@ async function comment(apiFn, args) {
     ...cmts.map((c) => `- [comment:${c.id}] user:${c.user_id ?? "?"} (${c.created ?? "\u2014"}): ${c.text}`)
   ].join("\n");
 }
-var INTERNAL_PROJECT_LABEL;
+var INTERNAL_PROJECT_LABEL, IMAGE_MIME, IMAGE_EXT_RE, DEFAULT_MAX_IMAGES, MAX_IMAGE_BYTES, MAX_TEXT_BYTES, WEEKDAY_VI;
 var init_skills = __esm({
   "src/skills.ts"() {
     "use strict";
     init_update();
     INTERNAL_PROJECT_LABEL = "\u{1F3E0} N\u1ED9i b\u1ED9 \u2014 ngo\xE0i d\u1EF1 \xE1n (R&D, \u0111\xE0o t\u1EA1o, h\u1ECDp...)";
+    IMAGE_MIME = {
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      gif: "image/gif",
+      webp: "image/webp"
+    };
+    IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+    DEFAULT_MAX_IMAGES = 5;
+    MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+    MAX_TEXT_BYTES = 20 * 1024;
+    WEEKDAY_VI = ["", "T2", "T3", "T4", "T5", "T6", "T7", "CN"];
   }
 });
 
@@ -2054,7 +2238,7 @@ if (subcommand && subcommand in commands) {
   }
   process.exit(0);
 }
-log(`starting MCP server: pkg=${"1.7.0"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
+log(`starting MCP server: pkg=${"1.8.0"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
 var cfg;
 try {
   cfg = loadConfig();
@@ -2080,7 +2264,7 @@ try {
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.7.0" },
+  { name: "viot-tasktisk", version: "1.8.0" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -2256,11 +2440,45 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "get_meeting",
-      description: "Get meeting detail: purpose, t\u1ED5ng k\u1EBFt, n\u1ED9i dung th\u1EA3o lu\u1EADn, k\u1EBF ho\u1EA1ch h\xE0nh \u0111\u1ED9ng (v\u1EDBi ng\u01B0\u1EDDi ph\u1EE5 tr\xE1ch + h\u1EA1n).",
+      description: "Get meeting detail: purpose, t\u1ED5ng k\u1EBFt, n\u1ED9i dung th\u1EA3o lu\u1EADn, k\u1EBF ho\u1EA1ch h\xE0nh \u0111\u1ED9ng (v\u1EDBi ng\u01B0\u1EDDi ph\u1EE5 tr\xE1ch + h\u1EA1n), ghi ch\xFA, and attached files. Attached images (e.g. whiteboard photos, screenshots) are returned inline so you can read them.",
       inputSchema: {
         type: "object",
-        properties: { id: { type: "number", description: "Meeting ID" } },
+        properties: {
+          id: { type: "number", description: "Meeting ID" },
+          include_images: { type: "boolean", description: "Return attached images inline (default true)" },
+          max_images: { type: "number", description: "Max images to inline (default 5); the rest are listed as [att:ID] for get_attachment" }
+        },
         required: ["id"]
+      }
+    },
+    {
+      name: "get_attachment",
+      description: "Read one attachment by its [att:ID] (from get_meeting etc.). Images (png/jpg/gif/webp, \u22642 MB) are returned inline for you to view; small text files are returned as text; other types only report metadata.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "Attachment ID" } },
+        required: ["id"]
+      }
+    },
+    {
+      name: "meeting_calendar",
+      description: "Meeting calendar across ALL projects (incl. company-wide meetings) for a date range, grouped by day, compact: time, title, project, type, host, format/location. Includes recurring-series occurrences ([series:ID], not yet minuted) and real meetings ([meeting:ID], use get_meeting). Defaults to this week.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          from: { type: "string", description: "Start date YYYY-MM-DD (default: Monday this week)" },
+          to: { type: "string", description: "End date YYYY-MM-DD (default: Sunday this week)" },
+          project_id: { type: "number", description: "Only meetings of this project" },
+          include_links: { type: "boolean", description: "Include online meeting URLs (default false)" }
+        }
+      }
+    },
+    {
+      name: "list_meeting_series",
+      description: "Recurring meeting definitions (weekly/biweekly): schedule, host, participants, purpose.",
+      inputSchema: {
+        type: "object",
+        properties: { project_id: { type: "number", description: "Only series of this project" } }
       }
     },
     {
@@ -2546,6 +2764,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params;
   try {
     let text;
+    let images = [];
     switch (name) {
       case "dashboard":
         text = await dashboard(api, getMe());
@@ -2592,8 +2811,17 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "list_meetings":
         text = await listMeetings(api, args);
         break;
+      case "meeting_calendar":
+        text = await meetingCalendar(api, args);
+        break;
+      case "list_meeting_series":
+        text = await listMeetingSeries(api, args);
+        break;
       case "get_meeting":
-        text = await getMeeting(api, args);
+        ({ text, images } = await getMeeting(api, apiBinary, args));
+        break;
+      case "get_attachment":
+        ({ text, images } = await getAttachment(apiBinary, args));
         break;
       case "add_meeting":
         text = await addMeeting(api, args);
@@ -2649,7 +2877,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
-    return { content: [{ type: "text", text }] };
+    return {
+      content: [
+        { type: "text", text },
+        ...images.map((i) => ({ type: "image", data: i.data, mimeType: i.mimeType }))
+      ]
+    };
   } catch (e) {
     log(`tool '${name}' failed: ${formatError(e)}`);
     return {

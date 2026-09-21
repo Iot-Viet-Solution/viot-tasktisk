@@ -1,4 +1,4 @@
-import type { User } from './api.js';
+import type { User, BinaryRes } from './api.js';
 import { getUpdateAvailable, getLocalVersion } from './update.js';
 
 // ---- Types mirrored from qlda-viot domain ----
@@ -637,18 +637,105 @@ export async function listMeetings(apiFn: ApiFn, { id }: { id: number }): Promis
   return lines.join('\n');
 }
 
-export async function getMeeting(apiFn: ApiFn, { id }: { id: number }): Promise<string> {
-  // Không có endpoint GET /meetings/:id → fetch qua project detail rồi filter.
-  // Cần biết project_id — gọi 1 lần /meetings/:id/tasks không có; workaround: dùng
-  // /projects danh sách rồi từng project lấy meetings. Optimize: gọi thẳng
-  // /projects/:pid nếu client biết. Nếu không, dùng approach naïve.
-  const projs = await apiFn<Array<{ id: number }>>('GET', '/projects');
-  for (const p of projs) {
-    const meetings = await apiFn<MeetingSummary[]>('GET', `/projects/${p.id}/meetings`);
-    const m = meetings.find(x => x.id === id);
-    if (m) return formatMeetingDetail(m);
+/** Tool result that carries images alongside text (rendered as MCP `image` content blocks). */
+export interface ImageBlock { data: string; mimeType: string }
+export interface ToolOutput { text: string; images: ImageBlock[] }
+type BinFn = (path: string, maxBytes?: number) => Promise<BinaryRes>;
+
+// Claude's vision accepts these; svg/bmp/etc. are listed but not inlined.
+const IMAGE_MIME: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+};
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+const DEFAULT_MAX_IMAGES = 5;
+// Each inlined image costs tokens and there is no image lib to downscale, so skip big ones and say so.
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+const MAX_TEXT_BYTES = 20 * 1024;
+
+/** Stored names are "<timestamp>_<original>" — show the original. */
+function attDisplayName(name: string | null): string {
+  return String(name || '').replace(/^\d+_/, '') || 'tệp';
+}
+function imageMimeOf(name: string | null): string | null {
+  const ext = /\.([a-z0-9]+)$/i.exec(name || '')?.[1]?.toLowerCase();
+  return ext ? IMAGE_MIME[ext] || null : null;
+}
+
+async function fetchMeeting(apiFn: ApiFn, id: number): Promise<MeetingSummary | null> {
+  try {
+    return await apiFn<MeetingSummary>('GET', `/meetings/${id}`);
+  } catch {
+    // Older qlda-viot deployments have no GET /meetings/:id — scan project by project instead.
+    const projs = await apiFn<Array<{ id: number }>>('GET', '/projects');
+    for (const p of projs) {
+      const meetings = await apiFn<MeetingSummary[]>('GET', `/projects/${p.id}/meetings`);
+      const m = meetings.find(x => x.id === id);
+      if (m) return m;
+    }
+    return null;
   }
-  return `_Không tìm thấy cuộc họp #${id}._`;
+}
+
+export interface GetMeetingArgs { id: number; include_images?: boolean; max_images?: number }
+
+export async function getMeeting(apiFn: ApiFn, binFn: BinFn, args: GetMeetingArgs): Promise<ToolOutput> {
+  const { id, include_images = true } = args;
+  const maxImages = args.max_images ?? DEFAULT_MAX_IMAGES;
+  const m = await fetchMeeting(apiFn, id);
+  if (!m) return { text: `_Không tìm thấy cuộc họp #${id}._`, images: [] };
+
+  const lines: string[] = [formatMeetingDetail(m)];
+  const images: ImageBlock[] = [];
+
+  // Attachments are best-effort: a failure here must not hide the minutes themselves.
+  let atts: Attachment[] = [];
+  try { atts = await apiFn<Attachment[]>('GET', `/attachments/meeting/${id}`); } catch { /* ignore */ }
+
+  const notes = atts.filter(a => a.kind === 'note' && (a.text || '').trim());
+  const files = atts.filter(a => a.kind !== 'note' && a.kind !== 'comment' && a.kind !== 'link' && a.name);
+  if (notes.length) {
+    lines.push(`\n## 🗒️ Ghi chú (${notes.length})`);
+    notes.forEach(n => lines.push(`- ${(n.text || '').trim()}`));
+  }
+  if (files.length) {
+    lines.push(`\n## 📎 Tệp đính kèm (${files.length})`);
+    for (const f of files) {
+      const label = `[att:${f.id}] ${attDisplayName(f.name)}`;
+      const isImage = IMAGE_EXT_RE.test(f.name || '');
+      const mime = imageMimeOf(f.name);
+      if (!isImage) { lines.push(`- ${label} (get_attachment để đọc)`); continue; }
+      if (!include_images) { lines.push(`- 🖼️ ${label}`); continue; }
+      if (!mime) { lines.push(`- 🖼️ ${label} — định dạng không hỗ trợ hiển thị`); continue; }
+      if (images.length >= maxImages) { lines.push(`- 🖼️ ${label} — vượt giới hạn ${maxImages} ảnh, dùng get_attachment`); continue; }
+      try {
+        const bin = await binFn(`/att/${f.id}`, MAX_IMAGE_BYTES);
+        images.push({ data: bin.data.toString('base64'), mimeType: mime });
+        lines.push(`- 🖼️ ${label} — ảnh #${images.length} bên dưới`);
+      } catch (e) {
+        lines.push(`- 🖼️ ${label} — không tải được: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+  return { text: lines.join('\n'), images };
+}
+
+/** Read one attachment by id (any entity): images come back as image blocks, small text files inline. */
+export async function getAttachment(binFn: BinFn, { id }: { id: number }): Promise<ToolOutput> {
+  const bin = await binFn(`/att/${id}`, MAX_IMAGE_BYTES * 2);
+  const name = bin.filename || `att:${id}`;
+  const mime = Object.values(IMAGE_MIME).includes(bin.mimeType) ? bin.mimeType : null;
+  if (mime) {
+    if (bin.data.length > MAX_IMAGE_BYTES) {
+      return { text: `[att:${id}] ${name} — ảnh ${(bin.data.length / 1048576).toFixed(1)} MB vượt giới hạn ${MAX_IMAGE_BYTES / 1048576} MB.`, images: [] };
+    }
+    return { text: `[att:${id}] ${name} (${mime}, ${Math.round(bin.data.length / 1024)} KB)`, images: [{ data: bin.data.toString('base64'), mimeType: mime }] };
+  }
+  if (/^text\/|json$|csv$/.test(bin.mimeType)) {
+    const body = bin.data.subarray(0, MAX_TEXT_BYTES).toString('utf8');
+    const cut = bin.data.length > MAX_TEXT_BYTES ? `\n… (cắt ở ${MAX_TEXT_BYTES / 1024} KB / ${Math.round(bin.data.length / 1024)} KB)` : '';
+    return { text: `[att:${id}] ${name}\n\n${body}${cut}`, images: [] };
+  }
+  return { text: `[att:${id}] ${name} — ${bin.mimeType}, ${Math.round(bin.data.length / 1024)} KB. Định dạng này chưa đọc được qua MCP.`, images: [] };
 }
 
 function formatMeetingDetail(m: MeetingSummary): string {
@@ -672,6 +759,96 @@ function formatMeetingDetail(m: MeetingSummary): string {
       lines.push(`${i + 1}. ${a.text} — 👤 ${who} · ⏰ ${a.due || 'chưa đặt hạn'}`);
     });
   }
+  return lines.join('\n');
+}
+
+/* ---- Meeting calendar + recurring series (read-only, projected fields) ---- */
+
+interface CalItem {
+  id: number | null; series_id: number | null; project_id: number | null; project_name: string | null;
+  title: string; type: string | null; date: string; start_time: string | null; duration_min: number | null;
+  status: string | null; host_name: string | null; format: string | null; location: string | null;
+  online_url: string | null; virtual: boolean;
+}
+interface MeetingSeries {
+  id: number; project_id: number | null; project_name?: string | null; meeting_type: string | null; name: string;
+  host_text: string | null; participants_text: string | null; weekday: number | null; start_time: string | null;
+  duration_min: number | null; freq: string | null; format: string | null; location: string | null;
+  online_url: string | null; purpose: string | null; active?: boolean;
+}
+
+const WEEKDAY_VI = ['', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+
+/** Join only the non-empty parts — keeps rows short instead of printing "—" placeholders. */
+function joinParts(parts: Array<string | number | null | undefined | false>, sep = ' · '): string {
+  return parts.filter(p => p !== null && p !== undefined && p !== false && String(p).trim() !== '').join(sep);
+}
+
+function endTime(start: string | null, durationMin: number | null): string {
+  if (!start) return '';
+  if (!durationMin) return start;
+  const [h, m] = start.split(':').map(Number);
+  const t = h * 60 + m + durationMin;
+  return `${start}–${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+}
+
+export interface MeetingCalendarArgs {
+  from?: string; to?: string; project_id?: number; include_links?: boolean;
+}
+
+export async function meetingCalendar(apiFn: ApiFn, args: MeetingCalendarArgs): Promise<string> {
+  const qs = new URLSearchParams();
+  if (args.from) qs.set('from', args.from);
+  if (args.to) qs.set('to', args.to);
+  const q = qs.toString();
+  let items = await apiFn<CalItem[]>('GET', `/meetings${q ? '?' + q : ''}`);
+  if (args.project_id != null) items = items.filter(i => i.project_id === args.project_id);
+  const range = `${args.from || 'tuần này'}${args.to ? ' → ' + args.to : ''}`;
+  if (!items.length) return `_Không có cuộc họp trong khoảng ${range}._`;
+
+  const lines: string[] = [`# Lịch họp (${items.length}) · ${range}`];
+  let day = '';
+  for (const i of items) {
+    if (i.date !== day) { day = i.date; lines.push('', `## ${day}`); }
+    const ref = i.id != null ? `[meeting:${i.id}]` : `[series:${i.series_id}]`;
+    const where = joinParts([i.format, i.location]);
+    lines.push('- ' + joinParts([
+      endTime(i.start_time, i.duration_min),
+      `${ref} **${i.title}**`,
+      i.project_name,
+      i.type,
+      // "done" is the default for real meetings and "scheduled" for virtual ones — only surface the odd ones.
+      i.status && !['done', 'scheduled'].includes(i.status) ? i.status : '',
+      i.host_name && `👤 ${i.host_name}`,
+      where,
+      args.include_links && i.online_url,
+      i.virtual && '_chưa tạo biên bản_',
+    ]));
+  }
+  return lines.join('\n');
+}
+
+export async function listMeetingSeries(apiFn: ApiFn, { project_id }: { project_id?: number }): Promise<string> {
+  let series = await apiFn<MeetingSeries[]>('GET', '/meeting-series');
+  series = series.filter(s => s.active !== false && (project_id == null || s.project_id === project_id));
+  if (!series.length) return '_Không có chuỗi họp định kỳ._';
+  const lines: string[] = [`# Họp định kỳ (${series.length})`, ''];
+  series.forEach(s => {
+    const when = joinParts([
+      s.weekday ? WEEKDAY_VI[s.weekday] : '',
+      endTime(s.start_time, s.duration_min),
+      s.freq === 'biweekly' ? '2 tuần/lần' : '',
+    ], ' ');
+    lines.push('- ' + joinParts([
+      `[series:${s.id}] **${s.name}**`,
+      when && `⏰ ${when}`,
+      s.project_name,
+      s.host_text && `👤 ${s.host_text}`,
+      s.participants_text && `👥 ${s.participants_text}`,
+      joinParts([s.format, s.location], ' '),
+    ]));
+    if (s.purpose) lines.push(`  ↳ ${s.purpose}`);
+  });
   return lines.join('\n');
 }
 
