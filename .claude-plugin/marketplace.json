@@ -1,0 +1,12 @@
+{
+  "name": "viot-tools",
+  "owner": { "name": "Iot Viet Solution" },
+  "metadata": { "description": "Claude Code plugins from Iot Viet Solution" },
+  "plugins": [
+    {
+      "name": "viot-tasktisk",
+      "source": "./plugin",
+      "description": "qlda-viot task tracking: MCP tools + skills for weekly review, task triage and meeting minutes."
+    }
+  ]
+}

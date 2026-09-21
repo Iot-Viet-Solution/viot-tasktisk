@@ -102,3 +102,13 @@ state is later surfaced as a banner inside the `dashboard` skill's output (`getU
 `runUpdate()` (the `update` subcommand) does the same version check synchronously, then re-runs
 `npm install -g [--prefix <installPrefix>] <tarball-url>` using whatever prefix was recorded at install
 time.
+
+## Claude Code plugin (`plugin/` + `.claude-plugin/marketplace.json`)
+
+The repo doubles as a Claude Code **marketplace** (`viot-tools`) containing one plugin at `plugin/`: 4 skills
+(`skills/*/SKILL.md`), and `.mcp.json` that spawns the globally-installed `viot-tasktisk` binary (it does **not**
+bundle `dist/` — tsup leaves `@modelcontextprotocol/sdk` external, so the plugin needs the npm install).
+Credentials are `userConfig` fields in `plugin.json` mapped to `QLDA_*` env vars. `version` is deliberately
+omitted from `plugin.json`/marketplace so plugin updates follow git commits (no fourth version string to sync).
+Validate with `claude plugin validate ./plugin` and `claude plugin validate .`. Skills refer to tools by bare
+name because plugin tools are prefixed `mcp__plugin_viot-tasktisk_qlda__`.

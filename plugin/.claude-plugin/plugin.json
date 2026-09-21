@@ -1,0 +1,29 @@
+{
+  "name": "viot-tasktisk",
+  "displayName": "VIOT Tasktisk",
+  "description": "qlda-viot task tracking for Claude: MCP tools (dashboard, tasks, projects, meetings with images) plus skills for weekly review, task triage and meeting minutes.",
+  "author": { "name": "Iot Viet Solution" },
+  "homepage": "https://github.com/Iot-Viet-Solution/viot-tasktisk",
+  "repository": "https://github.com/Iot-Viet-Solution/viot-tasktisk",
+  "userConfig": {
+    "qlda_url": {
+      "type": "string",
+      "title": "QLDA server URL",
+      "description": "Base URL of your qlda-viot server, e.g. https://qlda.example.com",
+      "required": true
+    },
+    "qlda_username": {
+      "type": "string",
+      "title": "QLDA username",
+      "description": "Your qlda-viot login name",
+      "required": true
+    },
+    "qlda_password": {
+      "type": "string",
+      "title": "QLDA password",
+      "description": "Your qlda-viot password (stored in the system keychain)",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

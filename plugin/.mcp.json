@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "qlda": {
+      "command": "viot-tasktisk",
+      "env": {
+        "QLDA_URL": "${user_config.qlda_url}",
+        "QLDA_USERNAME": "${user_config.qlda_username}",
+        "QLDA_PASSWORD": "${user_config.qlda_password}"
+      }
+    }
+  }
+}

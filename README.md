@@ -246,3 +246,14 @@ When you change source, run `npm run build` and commit `dist/index.js`.
 | `qanh` | qa | `123456` |
 
 Default URL: `http://localhost:3100`
+
+## Claude Code plugin (skills + MCP)
+
+Adds four skills (weekly review, task triage, meeting minutes, setup help) that load only when relevant, and
+registers the MCP server with credentials stored via the plugin's settings prompt. Requires the `viot-tasktisk`
+binary on PATH (see install above).
+
+```
+/plugin marketplace add Iot-Viet-Solution/viot-tasktisk
+/plugin install viot-tasktisk@viot-tools
+```
