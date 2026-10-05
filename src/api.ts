@@ -71,6 +71,39 @@ function httpErrorMessage(res: Response): string {
   return `${status} — gateway/timeout error, still failing after ${maxRetries} ${maxRetries === 1 ? 'retry' : 'retries'}`;
 }
 
+/** Pulls the best human-readable message out of a non-OK JSON body:
+ *  {error}, {message}, {error:{message}}, or provider-SDK shapes like
+ *  {data:{message, statusCode, isRetryable}} (e.g. "Data leak protection
+ *  rejected"). */
+function bodyMessage(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+  for (const key of ['error', 'message']) {
+    const v = b[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+    if (v && typeof v === 'object') {
+      const m = (v as Record<string, unknown>).message;
+      if (typeof m === 'string' && m.trim()) return m.trim();
+    }
+  }
+  const d = b.data;
+  if (d && typeof d === 'object') {
+    const m = (d as Record<string, unknown>).message;
+    if (typeof m === 'string' && m.trim()) return m.trim();
+  }
+  return null;
+}
+
+/** Reads a non-OK response and turns it into a useful Error, keeping the
+ *  upstream's own message (and status) instead of a bare "HTTP 4xx". */
+async function httpError(res: Response): Promise<Error> {
+  const raw = await res.text().catch(() => '');
+  let body: unknown = null;
+  try { body = raw ? JSON.parse(raw) : null; } catch { /* not JSON */ }
+  const msg = bodyMessage(body) ?? (raw.trim() ? raw.slice(0, 300).trim() : null);
+  return new Error(msg ? `${msg} (HTTP ${res.status})` : httpErrorMessage(res));
+}
+
 export async function login(base: string, username: string, password: string, signal?: AbortSignal): Promise<User> {
   baseUrl = base.replace(/\/$/, '');
   const res = await fetchWithRetry(() => fetch(`${baseUrl}/login`, {
@@ -80,8 +113,7 @@ export async function login(base: string, username: string, password: string, si
     signal,
   }));
   if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as { error?: string };
-    throw new Error(err.error ?? `Login failed: ${httpErrorMessage(res)}`);
+    throw new Error(`Login failed: ${(await httpError(res)).message}`);
   }
   const data = (await res.json()) as LoginRes;
   token = data.token;
@@ -98,10 +130,7 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   }));
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as { error?: string };
-    throw new Error(err.error ?? httpErrorMessage(res));
-  }
+  if (!res.ok) throw await httpError(res);
   return res.json() as Promise<T>;
 }
 
@@ -117,7 +146,7 @@ export async function apiBinary(path: string, maxBytes = Infinity): Promise<Bina
   const res = await fetchWithRetry(() => fetch(`${baseUrl}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   }));
-  if (!res.ok) throw new Error(httpErrorMessage(res));
+  if (!res.ok) throw await httpError(res);
   const declared = Number(res.headers.get('content-length'));
   if (declared > maxBytes) throw new Error(`File too large: ${declared} bytes (limit ${maxBytes})`);
   const data = Buffer.from(await res.arrayBuffer());

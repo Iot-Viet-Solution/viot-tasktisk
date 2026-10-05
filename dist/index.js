@@ -53,6 +53,34 @@ function httpErrorMessage(res) {
   if (!RETRYABLE_STATUS.has(res.status)) return status;
   return `${status} \u2014 gateway/timeout error, still failing after ${maxRetries} ${maxRetries === 1 ? "retry" : "retries"}`;
 }
+function bodyMessage(body) {
+  if (!body || typeof body !== "object") return null;
+  const b = body;
+  for (const key of ["error", "message"]) {
+    const v = b[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (v && typeof v === "object") {
+      const m = v.message;
+      if (typeof m === "string" && m.trim()) return m.trim();
+    }
+  }
+  const d = b.data;
+  if (d && typeof d === "object") {
+    const m = d.message;
+    if (typeof m === "string" && m.trim()) return m.trim();
+  }
+  return null;
+}
+async function httpError(res) {
+  const raw = await res.text().catch(() => "");
+  let body = null;
+  try {
+    body = raw ? JSON.parse(raw) : null;
+  } catch {
+  }
+  const msg = bodyMessage(body) ?? (raw.trim() ? raw.slice(0, 300).trim() : null);
+  return new Error(msg ? `${msg} (HTTP ${res.status})` : httpErrorMessage(res));
+}
 async function login(base, username, password, signal) {
   baseUrl = base.replace(/\/$/, "");
   const res = await fetchWithRetry(() => fetch(`${baseUrl}/login`, {
@@ -62,8 +90,7 @@ async function login(base, username, password, signal) {
     signal
   }));
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error ?? `Login failed: ${httpErrorMessage(res)}`);
+    throw new Error(`Login failed: ${(await httpError(res)).message}`);
   }
   const data = await res.json();
   token = data.token;
@@ -79,17 +106,14 @@ async function api(method, path, body) {
     },
     body: body !== void 0 ? JSON.stringify(body) : void 0
   }));
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error ?? httpErrorMessage(res));
-  }
+  if (!res.ok) throw await httpError(res);
   return res.json();
 }
 async function apiBinary(path, maxBytes = Infinity) {
   const res = await fetchWithRetry(() => fetch(`${baseUrl}${path}`, {
     headers: { Authorization: `Bearer ${token}` }
   }));
-  if (!res.ok) throw new Error(httpErrorMessage(res));
+  if (!res.ok) throw await httpError(res);
   const declared = Number(res.headers.get("content-length"));
   if (declared > maxBytes) throw new Error(`File too large: ${declared} bytes (limit ${maxBytes})`);
   const data = Buffer.from(await res.arrayBuffer());
@@ -253,7 +277,7 @@ var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
-    LOCAL_VERSION = true ? "1.9.0" : "dev";
+    LOCAL_VERSION = true ? "1.9.1" : "dev";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
@@ -2128,16 +2152,16 @@ import {
   ListToolsRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
 process.on("uncaughtException", (err) => {
-  log(`uncaughtException: ${formatError(err)}`);
-  process.stderr.write(`viot-tasktisk: ${formatError(err)}
+  const msg = `viot-tasktisk: uncaughtException (keeping session alive): ${formatError(err)}`;
+  log(msg);
+  process.stderr.write(`${msg}
 `);
-  process.exit(1);
 });
 process.on("unhandledRejection", (reason) => {
-  log(`unhandledRejection: ${formatError(reason)}`);
-  process.stderr.write(`viot-tasktisk: ${formatError(reason)}
+  const msg = `viot-tasktisk: unhandledRejection (keeping session alive): ${formatError(reason)}`;
+  log(msg);
+  process.stderr.write(`${msg}
 `);
-  process.exit(1);
 });
 var subcommand = process.argv[2];
 var subArgs = process.argv.slice(3);
@@ -2248,7 +2272,7 @@ if (subcommand && subcommand in commands) {
   }
   process.exit(0);
 }
-log(`starting MCP server: pkg=${"1.9.0"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
+log(`starting MCP server: pkg=${"1.9.1"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
 var cfg;
 try {
   cfg = loadConfig();
@@ -2274,7 +2298,7 @@ try {
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.9.0" },
+  { name: "viot-tasktisk", version: "1.9.1" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({

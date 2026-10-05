@@ -25,18 +25,20 @@ import type {
 
 declare const __PKG_VERSION__: string;
 
-// Last-resort net: without this, any exception outside the try/catch blocks below
-// (or thrown asynchronously once the MCP server is running) prints a raw Node
-// stack trace and dies silently from Claude's perspective instead of a clean message.
+// Last-resort net: exceptions outside the per-request try/catch (e.g. thrown
+// asynchronously once the MCP server is running) are logged to stderr + the
+// local log, but the process stays alive — exiting here would kill the whole
+// MCP session mid-run. Tool-call failures themselves are already caught and
+// returned as isError results inside the CallToolRequestSchema handler below.
 process.on('uncaughtException', (err) => {
-  log(`uncaughtException: ${formatError(err)}`);
-  process.stderr.write(`viot-tasktisk: ${formatError(err)}\n`);
-  process.exit(1);
+  const msg = `viot-tasktisk: uncaughtException (keeping session alive): ${formatError(err)}`;
+  log(msg);
+  process.stderr.write(`${msg}\n`);
 });
 process.on('unhandledRejection', (reason) => {
-  log(`unhandledRejection: ${formatError(reason)}`);
-  process.stderr.write(`viot-tasktisk: ${formatError(reason)}\n`);
-  process.exit(1);
+  const msg = `viot-tasktisk: unhandledRejection (keeping session alive): ${formatError(reason)}`;
+  log(msg);
+  process.stderr.write(`${msg}\n`);
 });
 
 const subcommand = process.argv[2];
