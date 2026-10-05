@@ -48,7 +48,7 @@ The wizard prints the exact snippet to paste into Claude Desktop when done.
 ### Windows
 
 ```powershell
-npm install -g https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.8.0.tgz
+npm install -g https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.9.0.tgz
 viot-tasktisk setup
 ```
 
@@ -56,11 +56,11 @@ viot-tasktisk setup
 
 ```bash
 # Global
-npm install -g https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.8.0.tgz
+npm install -g https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.9.0.tgz
 viot-tasktisk setup
 
 # User-local
-npm install -g --prefix ~/.npm-global https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.8.0.tgz
+npm install -g --prefix ~/.npm-global https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.9.0.tgz
 export PATH="$HOME/.npm-global/bin:$PATH"   # add to ~/.zshrc or ~/.bashrc
 viot-tasktisk setup
 ```
@@ -84,6 +84,7 @@ This registers `viot-tasks` as a stdio MCP server for each product:
 | Claude Desktop (Windows) | JSON `mcpServers` written directly | `%APPDATA%\Claude\claude_desktop_config.json` |
 | Claude Desktop (Linux) | JSON `mcpServers` written directly | `~/.config/Claude/claude_desktop_config.json` |
 | Claude Code (CLI) | `claude mcp add -s user viot-tasks -- <command>` | `~/.claude.json` (user scope) |
+| Command Code (CLI) | `cmdc mcp add -s user viot-tasks -- <command>` | `~/.commandcode/mcp.json` (user scope) |
 | VS Code | JSON `mcp.servers` written directly | platform user `settings.json` |
 | Antigravity CLI (Google) | JSON `mcpServers` written directly | `~/.gemini/config/mcp_config.json` |
 | Codex CLI (OpenAI) | TOML `[mcp_servers.viot-tasks]` written directly | `~/.codex/config.toml` |
@@ -93,8 +94,10 @@ Claude Code is the one exception: its CLI doesn't read MCP servers from `~/.clau
 the `claude mcp` subcommand, which stores it in `~/.claude.json`. `configure` shells out to
 `claude mcp remove` (ignoring "not found") then `claude mcp add`, so re-running it updates the
 command instead of erroring on a duplicate. This requires the `claude` CLI to be on PATH.
+Command Code works the same way: `configure` shells out to `cmdc mcp remove` / `cmdc mcp add -s user`
+(user scope, stored in `~/.commandcode/mcp.json`), which requires the `cmdc` CLI to be on PATH.
 
-Restart Claude Desktop / reload Claude Code after configuring.
+Restart Claude Desktop / reload Claude Code / Command Code after configuring.
 
 > **User-local install**: every target here launches the server as its own subprocess rather
 > than through your interactive shell, so none of them see a PATH change that only lives in
@@ -166,9 +169,9 @@ remotely), start with:
 viot-tasktisk doctor
 ```
 
-It checks Node version, config validity, URL reachability, login, and whether each Claude
-client (Desktop, Code, VS Code, Antigravity, Codex) has a working — not just present — `viot-tasks`
-registration, then prints the tail of the local log. Every server run (and every direct-CLI
+It checks Node version, config validity, URL reachability, login, and whether each client
+(Claude Desktop, Claude Code, Command Code, VS Code, Antigravity, Codex) has a working — not just
+present — `viot-tasks` registration, then prints the tail of the local log. Every server run (and every direct-CLI
 command) also appends to that log regardless of what the MCP client does with its own logs, at
 `~/.config/viot-tasktisk/logs/latest.log` (`%USERPROFILE%\.config\viot-tasktisk\logs\latest.log`
 on Windows) — useful when a client only shows a generic "failed to connect" with no detail. Paste
@@ -182,6 +185,7 @@ the `doctor` output (or the log file) when asking for help.
 | Tools don't show up in Claude Desktop / Claude Code | Config was written but the client hasn't reloaded — fully restart Claude Desktop, or start a new Claude Code session (MCP servers are only loaded at session start). |
 | `claude mcp list` shows `viot-tasks` as "Failed to connect" | Almost always a stale short command name (`viot-tasktisk` instead of the full path) from a user-local install predating this fix — re-run `viot-tasktisk configure` so it re-registers with the absolute path via `claude mcp add`. |
 | `configure` errors on the Claude Code step | The `claude` CLI isn't on PATH in the shell running `configure` — install/open Claude Code's CLI first, or configure that target manually with `claude mcp add -s user viot-tasks -- <full path to viot-tasktisk>`. |
+| `configure` errors on the Command Code step | The `cmdc` CLI isn't on PATH in the shell running `configure` — install/open Command Code first, or configure that target manually with `cmdc mcp add -s user viot-tasks -- <full path to viot-tasktisk>`. |
 
 ---
 

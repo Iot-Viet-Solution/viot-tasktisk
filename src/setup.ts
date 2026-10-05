@@ -53,7 +53,7 @@ export async function runConfigure(installPrefix?: string): Promise<void> {
   const targets = allTargets();
   let anyConfigured = false;
 
-  console.log('Configure Claude integrations:\n');
+  console.log('Configure MCP integrations:\n');
 
   for (const target of targets) {
     const already = isAlreadyConfigured(target);
@@ -73,7 +73,7 @@ export async function runConfigure(installPrefix?: string): Promise<void> {
   rl.close();
 
   if (anyConfigured) {
-    console.log('\nRestart Claude Desktop / reload Claude Code to apply changes.');
+    console.log('\nRestart the clients you configured to apply changes.');
   } else {
     console.log('\nNo changes made.');
     console.log('Add manually to either config file:');

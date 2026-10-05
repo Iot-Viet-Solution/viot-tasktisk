@@ -253,7 +253,7 @@ var init_update = __esm({
   "src/update.ts"() {
     "use strict";
     init_config();
-    LOCAL_VERSION = true ? "1.8.0" : "dev";
+    LOCAL_VERSION = true ? "1.9.0" : "dev";
     REMOTE_PKG = "https://raw.githubusercontent.com/Iot-Viet-Solution/viot-tasktisk/main/package.json";
     RELEASE_BASE = "https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/download";
     _updateAvailable = null;
@@ -1292,6 +1292,14 @@ function claudeDesktopTarget() {
 function claudeCodeTarget() {
   return { name: "Claude Code", configPath: join4(homedir4(), ".claude.json"), format: "claude-cli" };
 }
+function commandcodeTarget() {
+  return {
+    name: "Command Code",
+    configPath: join4(homedir4(), ".commandcode", "mcp.json"),
+    format: "claude-cli",
+    cliBinary: "cmdc"
+  };
+}
 function vscodeTarget() {
   const p = platform();
   let configPath;
@@ -1322,6 +1330,7 @@ function allTargets() {
   return [
     claudeDesktopTarget(),
     claudeCodeTarget(),
+    commandcodeTarget(),
     vscodeTarget(),
     antigravityTarget(),
     codexTarget()
@@ -1382,17 +1391,18 @@ function injectMcpServer(target, command) {
     return;
   }
   if (target.format === "claude-cli") {
+    const binary = target.cliBinary ?? "claude";
     const execOpts = { shell: platform() === "win32" };
     try {
-      execFileSync2("claude", ["mcp", "remove", "-s", "user", "viot-tasks"], { ...execOpts, stdio: "ignore" });
+      execFileSync2(binary, ["mcp", "remove", "-s", "user", "viot-tasks"], { ...execOpts, stdio: "ignore" });
     } catch {
     }
     try {
-      execFileSync2("claude", ["mcp", "add", "-s", "user", "viot-tasks", "--", command], execOpts);
+      execFileSync2(binary, ["mcp", "add", "-s", "user", "viot-tasks", "--", command], execOpts);
     } catch (err) {
       if (err.code === "ENOENT") {
         throw new Error(
-          "Claude Code CLI (`claude`) was not found on PATH. Install Claude Code first, then re-run `viot-tasktisk setup` (or `viot-tasktisk configure`) to register this MCP server."
+          `${target.name} CLI (\`${binary}\`) was not found on PATH. Install it first, then re-run \`viot-tasktisk setup\` (or \`viot-tasktisk configure\`) to register this MCP server.`
         );
       }
       throw err;
@@ -1508,7 +1518,7 @@ async function runConfigure(installPrefix) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const targets = allTargets();
   let anyConfigured = false;
-  console.log("Configure Claude integrations:\n");
+  console.log("Configure MCP integrations:\n");
   for (const target of targets) {
     const already = isAlreadyConfigured(target);
     const hint = already ? " (already configured \u2014 overwrite?)" : "";
@@ -1524,7 +1534,7 @@ async function runConfigure(installPrefix) {
   }
   rl.close();
   if (anyConfigured) {
-    console.log("\nRestart Claude Desktop / reload Claude Code to apply changes.");
+    console.log("\nRestart the clients you configured to apply changes.");
   } else {
     console.log("\nNo changes made.");
     console.log("Add manually to either config file:");
@@ -2073,7 +2083,7 @@ async function runDoctor() {
     out.push(row("Skipped", "no usable config to test"));
   }
   out.push("");
-  out.push("Claude client registrations");
+  out.push("Client registrations");
   for (const target of allTargets()) {
     if (!isAlreadyConfigured(target)) {
       out.push(row(target.name, "not configured"));
@@ -2238,7 +2248,7 @@ if (subcommand && subcommand in commands) {
   }
   process.exit(0);
 }
-log(`starting MCP server: pkg=${"1.8.0"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
+log(`starting MCP server: pkg=${"1.9.0"} node=${process.version} argv1=${process.argv[1] ?? "?"}`);
 var cfg;
 try {
   cfg = loadConfig();
@@ -2264,7 +2274,7 @@ try {
   process.exit(1);
 }
 var server = new Server(
-  { name: "viot-tasktisk", version: "1.8.0" },
+  { name: "viot-tasktisk", version: "1.9.0" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({

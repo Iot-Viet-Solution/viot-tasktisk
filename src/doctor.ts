@@ -81,7 +81,7 @@ export async function runDoctor(): Promise<void> {
   }
   out.push('');
 
-  out.push('Claude client registrations');
+  out.push('Client registrations');
   for (const target of allTargets()) {
     if (!isAlreadyConfigured(target)) {
       out.push(row(target.name, 'not configured'));

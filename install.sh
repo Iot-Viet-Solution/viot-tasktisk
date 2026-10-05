@@ -4,7 +4,7 @@ set -e
 # Keep this filename's version in lockstep with package.json's "version" —
 # `viot-tasktisk update` compares that field against this same release, so a
 # stale filename here silently breaks update-detection for everyone.
-REPO="https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.8.0.tgz"
+REPO="https://github.com/Iot-Viet-Solution/viot-tasktisk/releases/latest/download/viot-tasktisk-1.9.0.tgz"
 USER_PREFIX="$HOME/.npm-global"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -179,9 +179,9 @@ if [ -n "$QLDA_USERNAME_INPUT" ] && [ -n "$QLDA_PASSWORD_INPUT" ]; then
 fi
 
 if [ "$KEEP_EXISTING" -eq 1 ]; then
-  # Credentials are untouched — just (re)wire the Claude integrations, e.g.
+  # Credentials are untouched — just (re)wire the MCP integrations, e.g.
   # in case this reinstall adds a target that wasn't configured before.
-  echo "Reconfiguring Claude integrations (credentials unchanged)..."
+  echo "Reconfiguring MCP integrations (credentials unchanged)..."
   viot-tasktisk configure < "$SETUP_STDIN"
 elif [ "$choice" = "2" ]; then
   VIOT_INSTALL_PREFIX="$USER_PREFIX" viot-tasktisk setup < "$SETUP_STDIN"

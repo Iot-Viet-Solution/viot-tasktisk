@@ -7,12 +7,15 @@ export type ConfigFormat =
   | 'mcp-servers'   // { mcpServers: { name: { command } } }  — Claude Desktop, Antigravity
   | 'vscode'        // { mcp: { servers: { name: { type, command } } } }
   | 'toml'          // [mcp_servers.<name>]\ncommand = "..."
-  | 'claude-cli';   // managed via `claude mcp add/remove`, not a direct file edit — Claude Code
+  | 'claude-cli';   // managed via `<cliBinary> mcp add/remove -s user`, not a direct file
+                    // edit — Claude Code (claude) and Command Code (cmdc)
 
 export interface ClaudeTarget {
   name: string;
   configPath: string;
   format: ConfigFormat;
+  /** Binary for 'claude-cli' targets (default 'claude'). */
+  cliBinary?: string;
 }
 
 // ── Targets ───────────────────────────────────────────────────────────────────
@@ -35,6 +38,18 @@ export function claudeCodeTarget(): ClaudeTarget {
   // managed exclusively through `claude mcp add/remove`, which stores user-scope
   // servers in ~/.claude.json. configPath here is informational only.
   return { name: 'Claude Code', configPath: join(homedir(), '.claude.json'), format: 'claude-cli' };
+}
+
+export function commandcodeTarget(): ClaudeTarget {
+  // Command Code (cmdc) — same CLI-managed model as Claude Code:
+  // `cmdc mcp add -s user` stores user-scope servers in
+  // ~/.commandcode/mcp.json. configPath is informational only.
+  return {
+    name: 'Command Code',
+    configPath: join(homedir(), '.commandcode', 'mcp.json'),
+    format: 'claude-cli',
+    cliBinary: 'cmdc',
+  };
 }
 
 export function vscodeTarget(): ClaudeTarget {
@@ -73,6 +88,7 @@ export function allTargets(): ClaudeTarget[] {
   return [
     claudeDesktopTarget(),
     claudeCodeTarget(),
+    commandcodeTarget(),
     vscodeTarget(),
     antigravityTarget(),
     codexTarget(),
@@ -141,22 +157,23 @@ export function injectMcpServer(target: ClaudeTarget, command: string): void {
   }
 
   if (target.format === 'claude-cli') {
-    // On Windows, `claude` resolves to a `claude.cmd` npm shim — child_process
+    // On Windows, `claude`/`cmdc` resolve to `.cmd` npm shims — child_process
     // will not execute .cmd/.bat files unless `shell: true` is set, otherwise
-    // it fails with ENOENT even though `claude` genuinely is on PATH.
+    // it fails with ENOENT even though the binary genuinely is on PATH.
+    const binary = target.cliBinary ?? 'claude';
     const execOpts = { shell: platform() === 'win32' };
 
     // Idempotent: drop any existing entry first so re-running configure updates
     // the command instead of erroring on a duplicate name.
-    try { execFileSync('claude', ['mcp', 'remove', '-s', 'user', 'viot-tasks'], { ...execOpts, stdio: 'ignore' }); }
+    try { execFileSync(binary, ['mcp', 'remove', '-s', 'user', 'viot-tasks'], { ...execOpts, stdio: 'ignore' }); }
     catch { /* wasn't configured yet */ }
 
     try {
-      execFileSync('claude', ['mcp', 'add', '-s', 'user', 'viot-tasks', '--', command], execOpts);
+      execFileSync(binary, ['mcp', 'add', '-s', 'user', 'viot-tasks', '--', command], execOpts);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         throw new Error(
-          'Claude Code CLI (`claude`) was not found on PATH. Install Claude Code first, ' +
+          `${target.name} CLI (\`${binary}\`) was not found on PATH. Install it first, ` +
           'then re-run `viot-tasktisk setup` (or `viot-tasktisk configure`) to register this MCP server.',
         );
       }

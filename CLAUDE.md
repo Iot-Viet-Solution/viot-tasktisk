@@ -8,7 +8,7 @@ An MCP server (stdio transport) that exposes task-tracking from the `qlda-viot` 
 Claude (`dashboard`, `update_work`, `get_item`, `add_task`). Same logic is also exposed as a standalone
 CLI (`viot-tasktisk dashboard`, `get-item`, `add-task`, `update-task`, `update-item`) for use without an
 MCP client. Ships as a single npm-installable binary; also self-registers into Claude Desktop, Claude
-Code, VS Code, Antigravity, and Codex CLI config files.
+Code, Command Code, VS Code, Antigravity, and Codex CLI config files.
 
 ## Commands
 
@@ -84,9 +84,11 @@ prefix) and `claude-config.ts` (to decide whether MCP configs need the full bina
 **Multi-target MCP registration (`src/claude-config.ts`).** Each target (`ClaudeTarget`) declares a
 `configPath` and one of 4 `ConfigFormat`s: `mcp-servers` (plain JSON, Claude Desktop/Antigravity),
 `vscode` (nested under `mcp.servers`), `toml` (hand-rolled regex-based TOML editing for Codex, no TOML
-library dependency), or `claude-cli` (Claude Code — **not** a file edit; shells out to
-`claude mcp remove` then `claude mcp add -s user`, since Claude Code's CLI does not read MCP servers
-from `~/.claude/settings.json` despite that file existing). `resolveCommand()` decides between the bare
+library dependency), or `claude-cli` (**not** a file edit; shells out to `<cliBinary> mcp remove`
+then `<cliBinary> mcp add -s user`, since those CLIs own their config). Claude Code uses the
+default `claude` binary (its CLI does not read MCP servers from `~/.claude/settings.json` despite
+that file existing); Command Code passes `cliBinary: 'cmdc'`, storing user scope in
+`~/.commandcode/mcp.json`. `resolveCommand()` decides between the bare
 command name and the full `<prefix>/bin/viot-tasktisk` path — every target spawns the server as its own
 subprocess, so a PATH change that only lives in `~/.bashrc`/`~/.zshrc` (user-local installs) is invisible
 to them; only global installs can use the bare command name safely.
